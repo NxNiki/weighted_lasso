@@ -1,0 +1,327 @@
+---
+title: "weighted_lasso_simulation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## define informative predictors and noise predictors
+```{r}
+
+rm(list = ls())
+
+num.info.predictors = 50
+num.samples = 500
+
+num.noise.predictors.list = seq(10, 1000, by = 40)
+#num.samples.list = seq(100, 1000, by = 100)
+
+nfolds = 5
+lambda.seq = 10^seq(-3,3, length = 100)
+nboots = 5000
+
+dir.name = paste("info_predictors", toString(num.info.predictors), "samples", toString(num.samples), "boots", toString(nboots))
+if (!file.exists(dir.name)){
+    dir.create(dir.name)
+}
+
+len.list = length(num.noise.predictors.list)
+#print(lambda.seq)
+
+feature.weight.mean.diff.boot = function(x, y, nboots, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i in 1:nboots) {
+        set.seed(i)
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+
+        #f.w.boot[i, ] = abs(apply(x.boot[y.boot==0,], 2, mean) - apply(x.boot[y.boot==1,], 2, mean))
+        f.w.boot[i, ] = apply(x.boot[y.boot==0,], 2, mean) - apply(x.boot[y.boot==1,], 2, mean)
+    }
+    
+    feature.weight = scale.0.1(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean))*9 +1
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100 
+    }
+    return(feature.weight)
+    
+}
+
+```
+
+## regression:
+```{r}
+
+library(glmnet)
+source("scriptd_stats02_cv_functions.R")
+
+#print("beta:")
+#print(beta)
+
+
+result.ridge = data.frame(matrix(NA, len.list, nboots))
+result.lasso = data.frame(matrix(NA, len.list, nboots))
+result.w.lasso = data.frame(matrix(NA, len.list, nboots))
+result.ols = data.frame(matrix(NA, len.list, nboots))
+
+coef.ridge = vector("list", length = len.list) 
+coef.lasso = vector("list", length = len.list) 
+coef.w.lasso = vector("list", length = len.list)
+coef.true = vector("list", length = len.list)
+coef.ols = vector("list", length = len.list) 
+
+for (i.list in 1:len.list){
+    
+    num.noise.predictors = num.noise.predictors.list[i.list]
+    num.predictors = num.info.predictors + num.noise.predictors
+    
+    ridge.coefs = matrix(NA, num.predictors, nboots)
+    lasso.coefs = matrix(NA, num.predictors, nboots)
+    w.lasso.coefs = matrix(NA, num.predictors, nboots)
+    ols.coefs = matrix(NA, num.predictors, nboots)
+
+    set.seed(123)
+    beta = cbind(c(rnorm(num.info.predictors, 0, 1), rep(0, 1, num.noise.predictors)))
+    coef.true[[i.list]] = beta
+    
+    for (i.boot in 1:nboots){
+
+        i.seed = (i.boot-1)*nboots + i.list
+        #print(num.noise.predictors)
+        
+        set.seed(i.seed+111)
+        x = matrix(rnorm(num.predictors* num.samples, 0, 1), nrow = num.samples, ncol = num.predictors)
+        #print(dim(x))
+        set.seed(i.seed+222)
+        y = x %*% beta + rnorm(num.samples, 0, 1) 
+        #y = x %*% beta
+        #print(length(y))
+        y[y>0] = 1
+        y[y<=0] = 0
+        
+        
+        train.idx = sample(num.samples, num.samples*.80)
+        #print(train.idx)
+        
+        x.train = x[train.idx,]
+        x.test = x[-train.idx,]
+        
+        y.train = y[train.idx]
+        y.test = y[-train.idx]
+        
+        set.seed(444)
+        penalty.weight = feature.weight.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = .2)
+        ols.fit = glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = 0)
+        ols.y.hat = predict(ols.fit, x.test, type = "class")
+        ols.acc = compute.acc(y.test, ols.y.hat)
+        #print(ols.acc)
+        result.ols[i.list, i.boot] = ols.acc[1]
+        ols.coefs[, i.boot] = coef(ols.fit, s = ols.fit$lambda.min)[-1]
+        
+        set.seed(444)
+        ridge.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0, lambda = lambda.seq, type.measure = "class")
+        ridge.y.hat = predict(ridge.fit$glmnet.fit, x.test, s = ridge.fit$lambda.min, type = "class")
+        ridge.acc = compute.acc(y.test, ridge.y.hat)
+        #print(ridge.acc)
+        result.ridge[i.list, i.boot] = ridge.acc[1]
+        ridge.coefs[, i.boot] = coef(ridge.fit, s = ridge.fit$lambda.min)[-1]
+        
+        set.seed(444)
+        lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class")
+        lasso.y.hat = predict(lasso.fit$glmnet.fit, x.test, s = lasso.fit$lambda.min, type = "class")
+        lasso.acc = compute.acc(y.test, lasso.y.hat)
+        #print(lasso.acc)
+        result.lasso[i.list, i.boot] = lasso.acc[1]
+        lasso.coefs[, i.boot] = coef(lasso.fit, s = lasso.fit$lambda.min)[-1]
+        
+        set.seed(444)
+        penalty.weight = feature.weight.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = .5)
+        w.lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
+        w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = "class")
+        w.lasso.acc = compute.acc(y.test, w.lasso.y.hat)
+        #print(w.lasso.acc)
+        result.w.lasso[i.list, i.boot] = w.lasso.acc[1]
+        w.lasso.coefs[, i.boot] = coef(w.lasso.fit, s = w.lasso.fit$lambda.min)[-1]
+    
+    }
+coef.ridge[[i.list]] = ridge.coefs
+coef.lasso[[i.list]] = lasso.coefs
+coef.w.lasso[[i.list]] = w.lasso.coefs
+coef.ols[[i.list]] = ols.coefs
+}
+
+```
+
+
+```{r}
+
+result.ridge$method = rep("ridge", 1, nrow(result.ridge))
+result.ridge$num.noise.predictors = num.noise.predictors.list
+
+result.lasso$method = rep("lasso", 1, nrow(result.lasso))
+result.lasso$num.noise.predictors = num.noise.predictors.list
+
+#result.all = rbind(result.ridge, result.lasso)
+
+result.w.lasso$method = rep("wlasso", 1, nrow(result.w.lasso))
+result.w.lasso$num.noise.predictors = num.noise.predictors.list
+
+result.ols$method = rep("ols", 1, nrow(result.lasso))
+result.ols$num.noise.predictors = num.noise.predictors.list
+
+result.all = rbind(result.ridge, result.lasso, result.w.lasso, result.ols)
+
+#print(result.all)
+file.sep = .Platform$file.sep
+write.table(result.all, paste(dir.name, file.sep, "result_ridge_lasso_wlasso_ols.csv", sep = ""), row.names = F, sep = ",")
+
+```
+
+```{r, fig1, fig.width = 10, fig.height= 5}
+library(reshape2)
+library(ggpubr)
+library(ggplot2)
+
+result.all = read.table(paste(dir.name, file.sep, "result_ridge_lasso_wlasso_ols.csv", sep = ""), sep = ",", header = T)
+result.plot = melt(result.all, id.vars = c("num.noise.predictors", "method"), variable.name = "boot.idx", value.name = "accuracy")
+#print(result.plot)
+
+#ggboxplot(result.plot, x = "num.noise.predictors", y = "accuracy", color = "method", add = "jitter", palette = "joc")
+
+#ggline(result.plot, x = "num.noise.predictors", y = "accuracy", group = "method", color = "method", shape = "method",
+#       add = c("mean_se", "jitter"), palette = "joc")
+
+result.all$mean = apply(result.all[,1:nboots], 1, mean)
+result.all$se = apply(result.all[,1:nboots], 1, sd)/sqrt(nboots)
+
+pd <- position_dodge(3) # move them .05 to the left and right
+ggplot(result.all, aes(x=num.noise.predictors, y=mean, colour=method, group=method)) + 
+    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position=pd) +
+    geom_line(position=pd) +
+    geom_point(position=pd, size=1)
+
+
+```
+
+## save coefs:
+```{r}
+
+num.predictors.list = num.info.predictors + num.noise.predictors.list
+for (i in 1:len.list){
+    
+    plot.data.ridge = as.data.frame(coef.ridge[[i]])
+    plot.data.ridge$predictors = 1:num.predictors.list[i]
+    plot.data.ridge$method = rep("ridge", 1, num.predictors.list[i])
+    plot.data.ridge = melt(plot.data.ridge, id.vars = c("predictors", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data.lasso = as.data.frame(coef.lasso[[i]])
+    plot.data.lasso$predictors = 1:num.predictors.list[i]
+    plot.data.lasso$method = rep("lasso", 1, num.predictors.list[i])
+    plot.data.lasso = melt(plot.data.lasso, id.vars = c("predictors", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data.w.lasso = as.data.frame(coef.w.lasso[[i]])
+    plot.data.w.lasso$predictors = 1:num.predictors.list[i]
+    plot.data.w.lasso$method = rep("wlasso", 1, num.predictors.list[i])
+    plot.data.w.lasso = melt(plot.data.w.lasso, id.vars = c("predictors", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data.ols = as.data.frame(coef.ols[[i]])
+    plot.data.ols$predictors = 1:num.predictors.list[i]
+    plot.data.ols$method = rep("ols", 1, num.predictors.list[i])
+    plot.data.ols = melt(plot.data.ols, id.vars = c("predictors", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data.beta = data.frame(predictors = 1:num.predictors.list[i])
+    plot.data.beta$method = rep("true_beta", 1, num.predictors.list[i])
+    plot.data.beta$boot = rep("V1", 1, num.predictors.list[i])
+    plot.data.beta$coefs = coef.true[[i]]
+    
+    plot.data = rbind(plot.data.ridge, plot.data.lasso, plot.data.w.lasso, plot.data.ols, plot.data.beta)
+    
+    write.table(plot.data, paste(dir.name, file.sep, "coefs_", toString(i), "_ridge_lasso_wlasso_ols.csv", sep = ""), row.names = F, sep = ",")
+    
+}
+```
+
+```{r, fig.height = 20, fig.width = 20, fig.align = "center"}
+
+library(ggpubr)
+library(ggplot2)
+
+num.predictors.list = num.info.predictors + num.noise.predictors.list
+#for (i in 1:len.list){
+i = 10
+
+    plot.data = read.table(paste(dir.name, file.sep, "coefs_", toString(i), "_ridge_lasso_wlasso_ols.csv", sep = ""), sep = ",", header = T)
+    #print(plot.data)
+    
+    plot.data$predictors[plot.data$predictors>num.info.predictors] = num.info.predictors + 1
+    plot.data.info = plot.data[plot.data$predictors<=num.info.predictors,]
+    plot.data.noise = plot.data[plot.data$predictors>num.info.predictors,]
+   
+    plot.data.info.method = plot.data.info[plot.data.info$method %in% c("lasso", "ridge", "wlasso"), ]
+    plot.data.info.beta = plot.data.info[plot.data.info$method %in% c("true_beta"), ]
+    
+    p<-ggplot(plot.data.info.method, aes(x = method, y=coefs, color=method, fill = method, group = method)) + 
+        geom_jitter(size = .5) + facet_wrap(~as.factor(predictors), ncol = 5, scales = "free") +
+        geom_hline(data = plot.data.info.beta, aes(yintercept=coefs), linetype="dashed", color = "red") + 
+        theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank())
+    print(p)
+```
+```{r, fig.height = 10, fig.width = 15, fig.align = "center"}
+plot.data.noise.method = plot.data.noise[plot.data.noise$method %in% c("lasso", "ridge", "wlasso"), ]
+plot.data.noise.beta = plot.data.noise[plot.data.noise$method %in% c("true_beta"), ]
+
+p2<-ggplot(plot.data.noise.method, aes(x = method, y=coefs, color=method, fill = method, group = method)) + 
+    geom_point(alpha = .2, position = "jitter", size = 3) +
+    geom_hline(data = plot.data.noise.beta, aes(yintercept=coefs), linetype="dashed", color = "red") + 
+    theme(axis.title.x=element_blank(),
+        axis.ticks.x=element_blank(), 
+        legend.position = "none",
+        text = element_text(size=20))
+print(p2)
+
+p3<-ggplot(plot.data.noise.method, aes(x = coefs, color=method, fill = method, group = method)) + 
+    geom_density(alpha = .4) +
+    theme(axis.title.x=element_blank(),
+          legend.position = "top",
+        text = element_text(size=20))
+print(p3)
+
+```
+
+```{r}
+#print(dim(coef.ridge))
+#coef.ridge.mean = apply(coef.ridge, c(1,2), mean)
+#print(dim(coef.ridge.mean))
+#print(coef.ridge[,,1])
+#
+#heatmap(coef.ridge.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[11:20,], Colv = NA, Rowv = NA)
+#
+#print(dim(coef.lasso))
+#coef.lasso.mean = apply(coef.lasso, c(1,2), mean)
+#print(dim(coef.lasso.mean))
+#print(coef.lasso[,,1])
+#
+#heatmap(coef.lasso.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[11:20,], Colv = NA, Rowv = NA)
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

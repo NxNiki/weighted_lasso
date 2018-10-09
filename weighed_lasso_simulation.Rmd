@@ -1,0 +1,207 @@
+---
+title: "weighted_lasso_simulation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## define informative predictors and noise predictors
+```{r}
+
+rm(list = ls())
+
+num.info.predictors = 10
+num.noise.predictors = 50
+num.samples.list = seq(100, 1000, by = 100)
+
+nfolds = 5
+lambda.seq = 10^seq(-3,3, length = 100)
+nboots = 10
+
+file.name = paste("ridge_lasso", toString(num.info.predictors), toString(num.noise.predictors), toString(nboots), ".csv", sep = "_")
+
+# glmnet.para is a list of arguments for glmnet.nested.cv. It is just called when method of feature.cv.test is glmnet.cv.
+glmnet.para=list(nfolds.inner = 5)
+glmnet.para$family = "binomial"
+glmnet.para$alpha = 1
+
+#print(lambda.seq)
+
+feature.weight.mean.diff.boot = function(x, y, nboots){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i in 1:nboots) {
+        set.seed(i)
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+
+        f.w.boot[i, ] = abs(apply(x.boot[y.boot==0,], 2, mean) - apply(x.boot[y.boot==1,], 2, mean))
+    }
+    
+    feature.weight = apply(f.w.boot, 2, sd) /apply(f.w.boot, 2, mean)
+    return(feature.weight)
+    
+}
+```
+
+## regression:
+```{r}
+num.predictors = num.info.predictors + num.noise.predictors
+
+library(glmnet)
+source("scriptd_stats02_cv_functions.R")
+
+set.seed(123)
+beta = cbind(c(rnorm(num.info.predictors, 0, 1), rep(0, 1, num.noise.predictors)))
+#print("beta:")
+#print(beta)
+
+result.ridge = data.frame(num.samples = num.samples.list)
+result.lasso = data.frame(num.samples = num.samples.list)
+result.w.lasso = data.frame(num.samples = num.samples.list)
+result.w.ridge = data.frame(num.samples = num.samples.list)
+
+len.samples.list = length(num.samples.list)
+
+coef.ridge = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
+coef.lasso = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
+
+for (n.boot in 1:nboots){
+  col.name = paste("boot", toString(n.boot), sep = "")
+  #print(col.name)
+  
+  ridge.acc.boot = vector(mode = "numeric", length = len.samples.list)
+  lasso.acc.boot = vector(mode = "numeric", length = len.samples.list)
+  w.lasso.acc.boot = vector(mode = "numeric", length = len.samples.list)
+  
+  for (n.idx in 1:len.samples.list){
+    
+    i.seed = (n.boot-1)*nboots + n.idx
+    num.samples = num.samples.list[n.idx]
+    #print(num.samples)
+    
+    set.seed(i.seed+111)
+    x = matrix(rnorm(num.predictors* num.samples, 0, 1), nrow = num.samples, ncol = num.predictors)
+    #print(dim(x))
+    set.seed(i.seed+222)
+    y = x %*% beta + rnorm(num.samples, 0, 1) 
+    #y = x %*% beta
+    #print(length(y))
+    y[y>0] = 1
+    y[y<=0] = 0
+    
+    
+    train.idx = sample(num.samples, num.samples*.80)
+    #print(train.idx)
+    
+    x.train = x[train.idx,]
+    x.test = x[-train.idx,]
+    
+    y.train = y[train.idx]
+    y.test = y[-train.idx]
+    
+    set.seed(444)
+    ridge.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0, lambda = lambda.seq, type.measure = "class")
+    ridge.y.hat = predict(ridge.fit$glmnet.fit, x.test, s = ridge.fit$lambda.min, type = "class")
+    ridge.acc = compute.acc(y.test, ridge.y.hat)
+    #print(ridge.acc)
+    ridge.acc.boot[n.idx] = ridge.acc[1]
+    coef.ridge[, n.idx, n.boot] = coef(ridge.fit, s = ridge.fit$lambda.min)[-1]
+    
+    set.seed(444)
+    lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class")
+    lasso.y.hat = predict(lasso.fit$glmnet.fit, x.test, s = lasso.fit$lambda.min, type = "class")
+    lasso.acc = compute.acc(y.test, lasso.y.hat)
+    #print(lasso.acc)
+    lasso.acc.boot[n.idx] = lasso.acc[1]
+    coef.lasso[, n.idx, n.boot] = coef(lasso.fit, s = lasso.fit$lambda.min)[-1]
+   
+    #set.seed(444)
+    #penalty.weight = feature.cv.boot(x.train, y.train, n = 100, method = "mean.diff", glmnet.para = glmnet.para) 
+    #penalty.weight = apply(penalty.weight, 1, sd)/apply(penalty.weight, 1, mean)
+    #w.lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
+    #w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = "class")
+    #w.lasso.acc = compute.acc(y.test, w.lasso.y.hat)
+    #print(w.lasso.acc)
+    #w.lasso.acc.boot[n.idx] = w.lasso.acc[1]
+    
+  }
+result.ridge[col.name] = ridge.acc.boot
+result.lasso[col.name] = lasso.acc.boot
+#result.w.lasso[col.name] = w.lasso.acc.boot
+}
+
+```
+
+```{r}
+library(reshape2)
+library(ggpubr)
+result.ridge$method = rep("ridge", 1, nrow(result.ridge))
+result.lasso$method = rep("lasso", 1, nrow(result.lasso))
+result.all = rbind(result.ridge, result.lasso)
+
+#result.w.lasso$method = rep("weighted_lasso", 1, nrow(result.lasso))
+#result.all = rbind(result.ridge, result.lasso, result.w.lasso)
+
+write.table(result.all, file.name, row.names = F, sep = ",")
+
+result.plot = melt(result.all, id.vars = c("num.samples", "method"), variable.name = "boot.idx", value.name = "accuracy")
+ggboxplot(result.plot, "num.samples", "accuracy", color = "method", add = "jitter",
+ palette = c("#00AFBB", "#E7B800"))
+
+
+```
+
+## print coefs:
+```{r}
+for (i in 1:(num.info.predictors+num.noise.predictors)){
+    
+    plot.data.ridge = as.data.frame(coef.ridge[i,,])
+    plot.data.ridge$num.samples = num.samples.list
+    plot.data.ridge$method = rep("ridge", 1, len.samples.list)
+    plot.data.ridge = melt(plot.data.ridge, id.vars = c("num.samples", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data.lasso = as.data.frame(coef.lasso[i,,])
+    plot.data.lasso$num.samples = num.samples.list
+    plot.data.lasso$method = rep("lasso", 1, len.samples.list)
+    plot.data.lasso = melt(plot.data.lasso, id.vars = c("num.samples", "method"), value.name = "coefs", variable.name = "boot")
+    
+    plot.data = rbind(plot.data.ridge, plot.data.lasso)
+    p = ggboxplot(plot.data, "num.samples", "coefs", color = "method", add = "jitter",
+              palette = c("#00AFBB", "#E7B800"),
+              title = paste("predictor ", toString(i), ": ", toString(beta[i]), sep = "")) + geom_hline(yintercept=beta[i], linetype="dashed", color = "red")
+    print(p)
+}
+```
+
+
+```{r}
+#print(dim(coef.ridge))
+#coef.ridge.mean = apply(coef.ridge, c(1,2), mean)
+#print(dim(coef.ridge.mean))
+#print(coef.ridge[,,1])
+#
+#heatmap(coef.ridge.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[11:20,], Colv = NA, Rowv = NA)
+#
+#print(dim(coef.lasso))
+#coef.lasso.mean = apply(coef.lasso, c(1,2), mean)
+#print(dim(coef.lasso.mean))
+#print(coef.lasso[,,1])
+#
+#heatmap(coef.lasso.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[11:20,], Colv = NA, Rowv = NA)
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

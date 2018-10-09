@@ -1,0 +1,72 @@
+---
+title: "simulations"
+author: "Xin Niu"
+date: "8/9/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r }
+fun.y = function(x){
+    y = 2*x + 1 + rnorm(n = length(x), mean = 0, sd = 5)
+    return(y)
+}
+
+n = seq(from = 10, to = 10000, by = 10)
+r = rep(NA, length = length(n))
+
+for (idx in 1:length(n)) {
+    x = seq(0,1, length = n[idx])
+    #print(2*x+1 + rnorm(n = n, mean = 0, sd = 1))
+    y = fun.y(x)
+    
+    cor = cor.test(x,y)
+    r[idx] = cor$estimate
+}
+
+
+
+
+```
+
+## Including Plots
+
+as the number of samples grows, the variance of r is smaller, and approches the true value:
+
+```{r pressure, echo=FALSE}
+plot(n, r, col = "red", cex = .1)
+```
+# lasso regularization:
+```{r}
+x = seq(from = -100, to = 100, by = 1)
+x2 = seq(from = -100, to = 100, by = 1)
+y = abs(x)
+y2 = .05*(x-50)^2 + 20
+
+plot(x, y, cex = .1, col = "red")
+lines(x, y2, cex = .1, col = "green")
+lines(x, y+y2, cex = .1, col = "blue")
+
+```
+# ridge regularization:
+```{r}
+x = seq(from = -100, to = 100, by = 1)
+y = x^2
+y2 = .05*(x-50)^2 + 20
+
+plot(x, y, cex = .1, col = "red")
+lines(x, y2, cex = .1, col = "green")
+lines(x, y+y2, cex = .1, col = "blue")
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

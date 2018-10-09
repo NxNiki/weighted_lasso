@@ -1,0 +1,276 @@
+---
+title: "weighted_lasso_simulation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## define informative predictors and noise predictors
+```{r}
+
+rm(list = ls())
+
+num.info.predictors = 50
+num.samples = 500
+
+num.noise.predictors.list = seq(50, 60, by = 10)
+#num.samples.list = seq(100, 1000, by = 100)
+
+nfolds = 5
+lambda.seq = 10^seq(-3,3, length = 100)
+nboots = 1
+
+dir.name = paste("wlasso_cutoff_info_predictors", toString(num.info.predictors), "samples", toString(num.samples), "boots", toString(nboots))
+if (!file.exists(dir.name)){
+    dir.create(dir.name)
+}
+
+len.list = length(num.noise.predictors.list)
+#print(lambda.seq)
+
+feature.weight.test = function(x, y, method = "ttest", cutoff = 0){
+    
+    feature.weight = matrix(NA, ncol(x),1)
+    for (i in 1:ncol(x)) {
+        if (method == "ttest") {
+            test.result = t.test(x[, i]~y)
+            #p = plot(y, x[,i], main = toString(test.result$p.value))
+            #print(p)
+            value = test.result$p.value
+        } else if (method == "kendall") {
+            test.result = cor.test(x[, i], y, method = "kendall")
+            value = abs(test.result$estimate)
+        } else if (method == "wilcox") {
+            test.result = wilcox.test(x[, i], y)
+            value = abs(test.result$estimate)
+        } else if (method == "spearman") {
+            test.result = cor.test(x[, i], y, method = "spearman")
+            value = abs(test.result$estimate)
+        } else if (method == "pearson") {
+            test.result = cor.test(x[, i], y)
+            value = abs(test.result$estimate)
+        } else if (method == "biserial") {
+            value = abs(biserial.cor(x[, i], y))
+        }
+        feature.weight[i] = value
+    }
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    
+    feature.weight = scale.0.1(feature.weight)*9 + 1
+    return(feature.weight)
+    
+}
+
+feature.weight.test.boot = function(x, y, method = "ttest", nboots = 500, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i.boot in 1:nboots){
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+        
+        for (i in 1:ncol(x)) {
+            f.w.boot[i.boot,] = feature.weight.test(x.boot, y.boot, method)
+        }
+    }
+    
+    feature.weight = scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))*9 + 1
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    
+    feature.weight = scale.0.1(feature.weight)*9 + 1
+    return(feature.weight)
+    
+}
+
+feature.weight.mean.diff.boot = function(x, y, nboots = 500, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i in 1:nboots) {
+        set.seed(i)
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+        
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        f.w.boot[i, ] =mean1 - mean2
+    }
+    
+    feature.weight = log(scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))*99 + 1, base = 100)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    return(feature.weight)
+    
+}
+
+feature.weight.sd.mean.diff.boot = function(x, y, nboots, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i in 1:nboots) {
+        set.seed(i)
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+        
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        std1 = apply(x.boot[y.boot==0,], 2, sd)
+        std2 = apply(x.boot[y.boot==1,], 2, sd)
+        
+        f.w.boot[i, ] = (std1+std2)/(mean1 - mean2)
+    }
+    
+    #feature.weight = log(scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))*99 + 1, base = 100)
+    feature.weight = log(scale.0.1(abs(apply(f.w.boot, 2, mean)))*99 + 1, base = 100)
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = max(feature.weight)
+    }
+    return(feature.weight)
+    
+}
+
+
+feature.weight.mean.diff.kfold = function(x, y, k = 10, cutoff = 0){
+    
+    f.w.boot = matrix(NA, k, ncol(x))
+    cv.k = createFolds(y, k, list = F)
+    
+    for (i in 1:k) {
+        x.boot = x[cv.k ==i,]
+        y.boot = y[cv.k ==i]
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        std1 = apply(x.boot[y.boot==0,], 2, sd)
+        std2 = apply(x.boot[y.boot==1,], 2, sd)
+        #f.w.boot[i, ] = ((mean1 + mean2)*(std1 + std2))/((mean1 - mean2)*(std1 - std2))
+        f.w.boot[i, ] = mean1 - mean2
+    }
+    
+    #feature.weight = log(scale.0.1(abs(apply(f.w.boot, 2, mean)))*99 + 1, base = 100)
+    feature.weight = log(scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))*99 + 1, base = 100)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = max(feature.weight)
+    }
+    return(feature.weight)
+    
+}
+
+
+```
+
+## regression:
+```{r, fig1, fig.width = 10}
+
+library(glmnet)
+library(reshape2)
+source("scriptd_stats02_cv_functions.R")
+
+#print("beta:")
+#print(beta)
+
+coef.true = vector("list", length = len.list)
+
+for (i.list in 1:len.list){
+    
+    num.noise.predictors = num.noise.predictors.list[i.list]
+    num.predictors = num.info.predictors + num.noise.predictors
+    
+    w.lasso.coefs = matrix(NA, num.predictors, nboots)
+
+    set.seed(123)
+    beta = cbind(c(rnorm(num.info.predictors, 0, 1), rep(0, 1, num.noise.predictors)))
+    #print(beta)
+    coef.true[[i.list]] = beta
+    
+    for (i.boot in 1:nboots){
+
+        i.seed = (i.boot-1)*nboots + i.list
+        #print(num.noise.predictors)
+        
+        set.seed(i.seed+111)
+        x = matrix(rnorm(num.predictors* num.samples, 0, 1), nrow = num.samples, ncol = num.predictors)
+        #print(dim(x))
+        set.seed(i.seed+222)
+        y = x %*% beta + rnorm(num.samples, 0, 1) 
+        #y = rnorm(num.samples, 0, 1) 
+        #y = x %*% beta
+        
+        #print(length(y))
+        y[y>0] = 1
+        y[y<=0] = 0
+        
+        set.seed(i.seed+333)
+        train.idx = sample(num.samples, num.samples*.80)
+        #print(train.idx)
+        
+        x.train = x[train.idx,]
+        x.test = x[-train.idx,]
+        
+        y.train = y[train.idx]
+        y.test = y[-train.idx]
+        
+        set.seed(444)
+        penalty.weight.mean.diff = feature.weight.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = 0)
+        penalty.weight.test = feature.weight.sd.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = 0)
+        penalty.weight.kfold = feature.weight.mean.diff.kfold(x.train, y.train, k = 10, cutoff = 0)
+        penalty.weight.t = feature.weight.test(x.train, y.train, method = "ttest", cutoff = 0)
+        #penalty.weight.t = feature.weight.test.boot(x.train, y.train, method = "ttest", nboots = 100, cutoff = 0)
+        
+        plot.df = data.frame(beta = beta, mean.diff.boot = penalty.weight.mean.diff, kfold = penalty.weight.kfold, test = penalty.weight.test, ttest = penalty.weight.t)
+        #plot.df = data.frame(beta = beta, ttest = penalty.weight.t)
+        
+        plot.df = melt(plot.df, id.var = c("beta"), variable.name = "method")
+        plot.df$feature.type = plot.df$beta!=0
+        print(plot.df)
+        p = ggplot(plot.df, aes(x = beta, y = value, group = feature.type, color = feature.type)) +
+            facet_wrap(~method, scales = "free") +
+            geom_point(alpha = .5)
+        #p = ggplot(plot.df, aes(value, fill = feature.type)) +
+        #    facet_wrap(~method, scales = "free") +
+        #    geom_histogram(bins = 100, alpha = .5)
+        print(p)
+    }
+
+#coef.w.lasso[[i.list]] = w.lasso.coefs
+}
+
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
