@@ -35,7 +35,152 @@ glmnet.para$alpha = 1
 
 #print(lambda.seq)
 
-feature.weight.mean.diff.boot = function(x, y, nboots){
+compute.acc = function(y, yhat) {
+    y = as.numeric(y)
+    yhat = as.numeric(yhat)
+    
+    acc <- sum(y == yhat, na.rm = TRUE) / length(y)
+    
+    ylevel = sort(unique(yhat), decreasing = F)
+    
+    if (length(ylevel) == 2) {
+        # asuming ylevel = c(0, 1)
+        sensi <- sum(y == yhat & y == ylevel[2], na.rm = TRUE) / sum(y == ylevel[2], na.rm = TRUE)
+        speci <- sum(y == yhat & y == ylevel[1], na.rm = TRUE) / sum(y == ylevel[1], na.rm = TRUE)
+    }
+    else if (length(ylevel==1)&max(y)==ylevel){
+        print('compute.acc: 1 level of yhat')
+        sensi <- 1
+        speci <- NaN
+    }
+    else if (length(ylevel==1)&min(y)==ylevel){
+        print('compute.acc: 1 level of yhat')
+        sensi <- NaN
+        speci <- 1
+    }
+    else {
+        print('compute.acc: more than 2 levels of yhat')
+        sensi <- NaN
+        speci <- NaN
+    }
+    
+    temp <- c(acc, sensi, speci)
+    return(temp)
+}
+
+scale.0.1 = function(dat) {
+    # the output will be coerced to matrix.
+    
+    dat = as.matrix(dat)
+    
+    mins = apply(dat, 2, min)
+    maxs = apply(dat, 2, max)
+    
+    scaled.dat = scale(dat, center = mins, scale = maxs - mins)
+    return(scaled.dat)
+}
+
+feature.weight.test = function(x, y, method = "ttest", cutoff = 0){
+    
+    feature.weight = matrix(NA, ncol(x),1)
+    for (i in 1:ncol(x)) {
+        if (method == "ttest") {
+            test.result = t.test(x[, i]~y)
+            #p = plot(y, x[,i], main = toString(test.result$p.value))
+            #print(p)
+            value = test.result$p.value
+        } else if (method == "kendall") {
+            test.result = cor.test(x[, i], y, method = "kendall")
+            value = abs(test.result$estimate)
+        } else if (method == "wilcox") {
+            test.result = wilcox.test(x[, i], y)
+            value = abs(test.result$estimate)
+        } else if (method == "spearman") {
+            test.result = cor.test(x[, i], y, method = "spearman")
+            value = abs(test.result$estimate)
+        } else if (method == "pearson") {
+            test.result = cor.test(x[, i], y)
+            value = abs(test.result$estimate)
+        } else if (method == "biserial") {
+            value = abs(biserial.cor(x[, i], y))
+        }
+        feature.weight[i] = value
+    }
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    
+    #feature.weight = scale.0.1(feature.weight)*9 + 1
+    return(feature.weight)
+    
+}
+
+
+# t-test:
+feature.weight.test.boot = function(x, y, method = "ttest", nboots = 500, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i.boot in 1:nboots){
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+        
+        for (i in 1:ncol(x)) {
+            f.w.boot[i.boot,] = feature.weight.test(x.boot, y.boot, method)
+        }
+    }
+    
+    feature.weight = scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))
+    feature.weight = log(feature.weight*(log.base-1) + 1, base = log.base)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    
+    return(feature.weight)
+    
+}
+
+# mean.diff.boot:
+feature.weight.mean.diff.boot = function(x, y, nboots = 500, cutoff = 0){
+    
+    f.w.boot = matrix(NA, nboots, ncol(x))
+    
+    for (i in 1:nboots) {
+        set.seed(i)
+        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
+        
+        x.boot = x[boot.idx,]
+        y.boot = y[boot.idx]
+        
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        f.w.boot[i, ] =mean1 - mean2
+    }
+    
+    feature.weight = scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))
+    feature.weight = log(feature.weight*(log.base-1) + 1, base = log.base)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = 100
+    }
+    return(feature.weight)
+    
+}
+
+# sd and mean diff boot:
+feature.weight.sd.mean.diff.boot = function(x, y, nboots, cutoff = 0){
     
     f.w.boot = matrix(NA, nboots, ncol(x))
     
@@ -44,14 +189,59 @@ feature.weight.mean.diff.boot = function(x, y, nboots){
         boot.idx = sample(1:nrow(x), nrow(x), replace = T)
         x.boot = x[boot.idx,]
         y.boot = y[boot.idx]
-
-        f.w.boot[i, ] = abs(apply(x.boot[y.boot==0,], 2, mean) - apply(x.boot[y.boot==1,], 2, mean))
+        
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        std1 = apply(x.boot[y.boot==0,], 2, sd)
+        std2 = apply(x.boot[y.boot==1,], 2, sd)
+        
+        f.w.boot[i, ] = (mean1 - mean2) + (std1 - std2)
     }
     
-    feature.weight = apply(f.w.boot, 2, sd) /apply(f.w.boot, 2, mean)
+    feature.weight = scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))
+    feature.weight = log(feature.weight*(log.base-1) + 1, base = log.base)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = max(feature.weight)
+    }
     return(feature.weight)
     
 }
+
+# mean.diff kfold:
+feature.weight.mean.diff.kfold = function(x, y, k = 10, cutoff = 0){
+    
+    f.w.boot = matrix(NA, k, ncol(x))
+    cv.k = createFolds(y, k, list = F)
+    
+    for (i in 1:k) {
+        x.boot = x[cv.k ==i,]
+        y.boot = y[cv.k ==i]
+        mean1 = apply(x.boot[y.boot==0,], 2, mean)
+        mean2 = apply(x.boot[y.boot==1,], 2, mean)
+        #std1 = apply(x.boot[y.boot==0,], 2, sd)
+        #std2 = apply(x.boot[y.boot==1,], 2, sd)
+        #f.w.boot[i, ] = ((mean1 + mean2)*(std1 + std2))/((mean1 - mean2)*(std1 - std2))
+        f.w.boot[i, ] = mean1 - mean2
+    }
+    
+    feature.weight = scale.0.1(abs(apply(f.w.boot, 2, sd) / apply(f.w.boot, 2, mean)))
+    feature.weight = log(feature.weight*(log.base-1) + 1, base = log.base)
+    
+    if (cutoff>0){
+        cutoff.value = quantile(feature.weight, cutoff)
+        # when we set this to 0, we have convergence problem, wo we set it to the min value of feature.weight.
+        #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
+        feature.weight[feature.weight>cutoff.value] = max(feature.weight)
+    }
+    return(feature.weight)
+    
+}
+
+
 ```
 
 ## regression:
@@ -73,10 +263,12 @@ result.w.ridge = data.frame(num.samples = num.samples.list)
 
 len.samples.list = length(num.samples.list)
 
+coef.ols = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
 coef.ridge = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
 coef.lasso = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
+coef.wlasso = array(rep(NA, (num.predictors)*nboots*len.samples.list), dim = c((num.predictors), len.samples.list, nboots))
 
-for (n.boot in 1:nboots){
+for (i.boot in 1:nboots){
   col.name = paste("boot", toString(n.boot), sep = "")
   #print(col.name)
   
@@ -86,7 +278,7 @@ for (n.boot in 1:nboots){
   
   for (n.idx in 1:len.samples.list){
     
-    i.seed = (n.boot-1)*nboots + n.idx
+    i.seed = (i.boot-1)*nboots + n.idx
     num.samples = num.samples.list[n.idx]
     #print(num.samples)
     
@@ -111,12 +303,22 @@ for (n.boot in 1:nboots){
     y.test = y[-train.idx]
     
     set.seed(444)
+        
+    ols.fit = glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = 0)
+    ols.y.hat = predict(ols.fit, x.test, type = "class")
+    ols.acc = compute.acc(y.test, ols.y.hat)
+    #print('OLS accuracy:')
+    #print(ols.acc)
+    result.ols[i.list, i.boot] = ols.acc[1]
+    coef.ols[, n.idx, i.boot] = coef(ols.fit, s = ols.fit$lambda.min)[-1]
+    
+    set.seed(444)
     ridge.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0, lambda = lambda.seq, type.measure = "class")
     ridge.y.hat = predict(ridge.fit$glmnet.fit, x.test, s = ridge.fit$lambda.min, type = "class")
     ridge.acc = compute.acc(y.test, ridge.y.hat)
     #print(ridge.acc)
     ridge.acc.boot[n.idx] = ridge.acc[1]
-    coef.ridge[, n.idx, n.boot] = coef(ridge.fit, s = ridge.fit$lambda.min)[-1]
+    coef.ridge[, n.idx, i.boot] = coef(ridge.fit, s = ridge.fit$lambda.min)[-1]
     
     set.seed(444)
     lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class")
@@ -124,16 +326,19 @@ for (n.boot in 1:nboots){
     lasso.acc = compute.acc(y.test, lasso.y.hat)
     #print(lasso.acc)
     lasso.acc.boot[n.idx] = lasso.acc[1]
-    coef.lasso[, n.idx, n.boot] = coef(lasso.fit, s = lasso.fit$lambda.min)[-1]
+    coef.lasso[, n.idx, i.boot] = coef(lasso.fit, s = lasso.fit$lambda.min)[-1]
    
-    #set.seed(444)
-    #penalty.weight = feature.cv.boot(x.train, y.train, n = 100, method = "mean.diff", glmnet.para = glmnet.para) 
-    #penalty.weight = apply(penalty.weight, 1, sd)/apply(penalty.weight, 1, mean)
-    #w.lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
-    #w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = "class")
-    #w.lasso.acc = compute.acc(y.test, w.lasso.y.hat)
+    set.seed(444)
+    #penalty.weight = feature.weight.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = .1)
+    penalty.weight = feature.weight.mean.diff.kfold(x.train, y.train, k = 10, cutoff = 0)
+    w.lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
+    w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = "class")
+    w.lasso.acc = compute.acc(y.test, w.lasso.y.hat)
+    #print('weighted lasso accuracy:')
     #print(w.lasso.acc)
-    #w.lasso.acc.boot[n.idx] = w.lasso.acc[1]
+    
+    result.w.lasso[i.list, i.boot] = w.lasso.acc[1]
+    coef.wlasso[, n.idx, i.boot] = coef(w.lasso.fit, s = w.lasso.fit$lambda.min)[-1]
     
   }
 result.ridge[col.name] = ridge.acc.boot
@@ -146,8 +351,10 @@ result.lasso[col.name] = lasso.acc.boot
 ```{r}
 library(reshape2)
 library(ggpubr)
+result.ols$method = rep("ols", 1, nrow(result.ols))
 result.ridge$method = rep("ridge", 1, nrow(result.ridge))
 result.lasso$method = rep("lasso", 1, nrow(result.lasso))
+result.wlasso$method = rep("w.lasso", 1, nrow(result.wlasso))
 result.all = rbind(result.ridge, result.lasso)
 
 #result.w.lasso$method = rep("weighted_lasso", 1, nrow(result.lasso))
