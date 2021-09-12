@@ -1,0 +1,667 @@
+---
+title: "weighted_lasso_simulation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## define plot and data organization functions
+```{r}
+library(ggpubr)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(plyr)
+library(dplyr)
+
+setwd("C:/Users/Xin/Dropbox/weighted_lasso_simulation")
+
+
+boxplot.size = 1
+boxplot.point.size = 1
+boxplot.notch = T
+
+file.sep = .Platform$file.sep
+
+plot.accuracy = function(file.name, y.name) {
+    
+    result.all = read.table(file.name, sep = ",", header = T)
+    
+    result.plot = melt(result.all, id.vars = c("num.noise.predictors", "method"), variable.name = "boot.idx", value.name = "accuracy")
+    result.plot = result.plot[, c(1,2,4)]
+    
+    # select num.noise.predictors:
+    result.plot = result.plot[result.plot$num.noise.predictors %in% num.noise.predictors.list, ]
+    result.plot$num.noise.predictors = as.factor(result.plot$num.noise.predictors)
+    
+    result.plot = result.plot[result.plot$method %in% method.list, ]
+    result.plot$method <- factor(result.plot$method, levels = method.list)
+    result.plot$method = mapvalues(result.plot$method, from = method.list, to = method.rename)
+
+    
+    result.all$mean = apply(result.all[,1:nboots], 1, mean)
+    result.all$se = apply(result.all[,1:nboots], 1, sd)/sqrt(nboots)
+    
+    result.all = result.all[result.all$method %in% method.list, ]
+    
+    
+    figure.name = paste0(dir.name, file.sep, 'prediction_accuracy_infopred_', 
+                         toString(num.info.predictors), '_boots_', toString(nboots), '.jpg')
+    
+    #p_acc = ggplot(result.plot, aes(x=num.noise.predictors, y=accuracy, fill = method)) + geom_boxplot() +
+    #      theme(plot.title = element_text(size=22))+
+    #      scale_fill_manual(values=method.palette)+
+    
+    p_acc = ggboxplot(data = result.plot, x = "num.noise.predictors", y = "accuracy", 
+                  color = "method", add = c("jitter", "point"), 
+                  add.params = list(size = boxplot.point.size, alpha = .7), size = boxplot.size,
+                  notch = boxplot.notch, palette = method.palette, outlier.shape = NA, #ylim = c(0.4, 1),
+                  title = paste0('sample size: ', toString(num.samples))) +
+        theme(plot.title = element_text(size=22))+
+        labs(x = "noise predictors", y = y.name)+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+        
+        #scale_color_discrete(name="method",
+        #                 breaks=method.list,
+        #                 labels=method.rename)+
+        #scale_shape_discrete(name="method",
+        #                 breaks=method.list,
+        #                 labels=method.rename)
+    
+    ggsave(figure.name, plot = p_acc, width = 12, height = 7)
+    #print(p_acc)
+    
+    return(p_acc)
+
+}
+
+
+```
+
+
+## plot prediction accuracy:
+```{r, fig1, fig.width = 10, fig.height= 6}
+
+num.info.predictors = 20
+num.samples = 200
+nboots = 50
+
+#dir.head = "simulation_mvarnorm__binomial_infopredictors"
+#dir.head = "simulation_mvarnorm_02_March_infopredictors"
+dir.head = "simulation_mvarnorm_infopredictors"
+
+#method.list = c("logistic", "ridge", "lasso", "wridge", "wlasso", "elasticnet")
+#method.list = c("logistic", "ridge", "lasso", "elasticnet", "wridge", "wlasso", "welasticnet")
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+method.rename  = c('Ridge', 'R-index Ridge', 'LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+num.noise.predictors.list = c(64, 128, 256, 512)
+
+# classification:
+dir.name = paste(dir.head, toString(num.info.predictors), 
+                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+
+
+file.name = paste(dir.name, file.sep, "prediction_accuracy_mean.diff.boot_x_10_.csv", sep = "")
+p_acc1 = plot.accuracy(file.name, y.name = 'prediction accuracy')
+
+
+num.samples = 500
+
+dir.name = paste(dir.head, toString(num.info.predictors), 
+                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+    
+file.name = paste(dir.name, file.sep, "prediction_accuracy_mean.diff.boot_x_10_.csv", sep = "")
+p_acc2 = plot.accuracy(file.name, y.name = 'prediction accuracy')
+
+
+
+# regression 1/17/2021:
+
+#method.list = c("lasso", "wlasso", "elasticnet", "welasticnet")
+#method.rename  = c('LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+#method.palette = c("#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+#dir.name = paste("simulation_mvarnorm__gaussian_infopredictors", toString(num.info.predictors), 
+#                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+
+# this file actually stores prediction bias
+#file.name = paste(dir.name, file.sep, "prediction_accuracy_cor_corr.boot_x_1_.csv", sep = "")
+#p_acc1 = plot.accuracy(file.name, y.name = 'prediction bias')
+#
+#file.name = paste(dir.name, file.sep, "prediction_accuracy_mae_corr.boot_x_1_.csv", sep = "")
+#p_mae1 = plot.accuracy(file.name, y.name = 'MAE')
+#
+#num.samples = 500
+#
+#dir.name = paste("simulation_mvarnorm__gaussian_infopredictors", toString(num.info.predictors), 
+#                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+#    
+#file.name = paste(dir.name, file.sep, "prediction_accuracy_cor_corr.boot_x_1_.csv", sep = "")
+#p_acc2 = plot.accuracy(file.name, y.name = 'prediction bias')
+#
+#file.name = paste(dir.name, file.sep, "prediction_accuracy_mae_corr.boot_x_1_.csv", sep = "")
+#p_mae2 = plot.accuracy(file.name, y.name = 'MAE')
+
+
+
+```
+
+
+## plot the difference, correlation betwwen ture and estimated coefficients for informative features
+## and ratio of zero estimates for the noise features:
+
+```{r}
+
+
+
+summary.coefs = function(num.info.predictors, num.samples, nboots){
+
+    #num.noise.predictors.list = 2^seq(7, 10, by = 1)
+    num.predictors.list = num.info.predictors + num.noise.predictors.list
+    
+    dir.name = paste(dir.head, toString(num.info.predictors), 
+                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+    
+    for (i in 1:length(num.predictors.list)) {
+        num.pred = toString(num.noise.predictors.list[i])
+        plot.data = read.table(paste0(dir.name, .Platform$file.sep, "coefs_infopredictors_20_noisepredictors_",num.pred, "_.csv"), 
+                               sep = ",", header = T)
+        
+        # select true beta coefficients:
+        # this does not work if beta were randomized:
+        #true_beta = plot.data[plot.data$predictors<=num.info.predictors & plot.data$method=='true_beta', 'coefs']  
+        # replace above line with this:
+        info.predictors.idx = plot.data[plot.data$method=='true_beta', 'coefs']!=0
+        true_beta = plot.data[plot.data$predictors %in% which(info.predictors.idx) & plot.data$method=='true_beta', 'coefs']  
+        
+        
+        #print(length(true_beta))
+        # select estimated coefs of info predictors:
+        plot.data.info = plot.data[plot.data$predictors %in% which(info.predictors.idx) & plot.data$method!='true_beta',]
+        plot.data.info$num.noise.predictors = num.pred
+        
+        plot.data.noise = plot.data[plot.data$predictors %in% which(!info.predictors.idx) & plot.data$method!='true_beta',]
+        plot.data.noise$num.noise.predictors = num.pred
+        
+        # add true beta to each method:
+        plot.data.info2 = merge(plot.data.info, plot.data[plot.data$predictors %in% which(info.predictors.idx) & plot.data$method=='true_beta', c('predictors', 'coefs')], by = 'predictors')
+        
+        
+        #print(dim(plot.data.info))
+        if (i==1){
+            plot.data.noise.raw = plot.data.noise
+            plot.data.info.raw = plot.data.info2
+            
+        } else {
+    
+            plot.data.noise.raw = rbind(plot.data.noise.raw, plot.data.noise)
+            plot.data.info.raw = rbind(plot.data.info.raw, plot.data.info2)
+            
+        }
+        
+        plot.data.info.summary = plot.data.info.raw %>%
+        arrange(predictors) %>%
+        mutate(coefs.error=abs((coefs.x - coefs.y)/coefs.y)) %>%
+        group_by(method, boot, num.noise.predictors) %>%
+        summarise(coefs.error.mean = mean(coefs.error),
+                  pearson = cor(coefs.x, coefs.y, method = 'pearson'),
+                  kendall.tau = cor(coefs.x, coefs.y, method = 'kendall'))
+    
+    }
+    
+    return(list(plot.data.info.summary, plot.data.noise.raw, plot.data.info.raw))
+}
+
+
+plot.coefs.estimation = function (plot.data.summary, plot.data.noise.raw){
+    
+    plot.data.summary2 = plot.data.summary[plot.data.summary$method %in% method.list, ]
+    # order the method so that they are plotted in the same order as in method.list
+    plot.data.summary2$method <- factor(plot.data.summary2$method, levels = method.list)
+    plot.data.summary2$method = mapvalues(plot.data.summary2$method, from = method.list, to = method.rename)
+    
+    #plot.data.summary2$num.noise.predictors = factor(plot.data.summary2$num.noise.predictors, levels = c(32, 64, 128, 256, 512, 1024, 2048))
+    plot.data.summary2$num.noise.predictors = factor(plot.data.summary2$num.noise.predictors, levels = num.noise.predictors.list)
+    
+    dir.name = paste(dir.head, toString(num.info.predictors), 
+                     "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+    
+    figure.name = paste0(dir.name, .Platform$file.sep, "plot_coefs_error_infopredictors_20_", 
+                         "sample_", toString(num.samples), ".jpg")
+    
+    p1 = ggboxplot(data = plot.data.summary2, x = "num.noise.predictors", y = "coefs.error.mean", 
+                  color = "method", add = "jitter", add.params = list(size = boxplot.point.size, alpha = .7), size = boxplot.size,
+                  notch = boxplot.notch, xlab = 'noise predictors', ylab = ' coefficient estimation error', 
+                  palette = method.palette, outlier.shape = NA, #ylim = c(0.2, 1),
+                  title = paste0('sample size: ', toString(num.samples))) +
+        theme(plot.title = element_text(size=22))+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+    
+    ggsave(figure.name, plot = p1, width = 12, height = 7)
+    #print(p1)
+    
+    figure.name = paste0(dir.name, .Platform$file.sep, "plot_coefs_corr_infopredictors_20_", 
+                         "sample_", toString(num.samples), ".jpg")
+    
+    p2 = ggboxplot(data = plot.data.summary2, x = "num.noise.predictors", y = "pearson", 
+                  color = "method", add = "jitter", add.params = list(size = boxplot.point.size), size = boxplot.size, 
+                  notch = F, xlab = 'noise predictors', ylab = "Pearson's R",
+                  palette = method.palette, outlier.shape = NA, #ylim = c(0.4, 1),
+                  title = paste0('sample size: ', toString(num.samples))) +
+        theme(plot.title = element_text(size=22))+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+    
+    ggsave(figure.name, plot = p2, width = 12, height = 7)
+    #print(p2)
+    
+    p22 = ggboxplot(data = plot.data.summary2, x = "num.noise.predictors", y = "kendall.tau", 
+                  color = "method", add = "jitter", add.params = list(size = boxplot.point.size, alpha = .7), size = boxplot.size,
+                  notch = boxplot.notch, xlab = 'noise predictors', ylab = "Kendall's tau", alpha = .7,
+                  palette = method.palette, outlier.shape = NA, #ylim = c(0.4, 1),
+                  title = paste0('sample size: ', toString(num.samples))) +
+        theme(plot.title = element_text(size=22))+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+    
+    ggsave(figure.name, plot = p2, width = 12, height = 7)
+    #print(p22)
+    
+    ## compute the proportion of zeros estimates of noise predictors:
+    
+    plot.data.melt = plot.data.noise.raw[plot.data.noise.raw$method %in% method.list[3:6], ]
+    plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list[3:6])
+    plot.data.melt$method = mapvalues(plot.data.melt$method, from = method.list[3:6], to = method.rename[3:6])
+    
+    #plot.data.melt = plot.data.noise.raw[plot.data.noise.raw$method %in% method.list, ]
+    #plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list)
+    #plot.data.melt$method = mapvalues(plot.data.melt$method, from = method.list, to = method.rename)
+    
+    #plot.data.melt$num.noise.predictors = factor(plot.data.melt$num.noise.predictors, levels = c(32, 64, 128, 256, 512, 1024, 2048))
+    plot.data.melt$num.noise.predictors = factor(plot.data.melt$num.noise.predictors, levels = num.noise.predictors.list)
+    
+    plot.data.melt = plot.data.melt %>%
+        select(-c(predictors)) %>%
+        group_by(method, num.noise.predictors, boot) %>%
+        #summarise_all(funs(sum(.==0)/n()))
+        summarise_all(funs(sum(.!=0)))
+    
+    
+    figure.name = paste0(dir.name, .Platform$file.sep, "plot_coefs_proportion_noisepredictors_20_", 
+                         "sample_", toString(num.samples), ".jpg")
+    
+    p3 = ggboxplot(data = plot.data.melt, x = "num.noise.predictors", y = "coefs", size = boxplot.size, point.size = 5,
+                  color = "method", add = "jitter", add.params = list(size = boxplot.point.size, alpha = .7), 
+                  notch = boxplot.notch, xlab = 'noise predictors', ylab = "number of nonzero coefficients (noise)",
+                  title = paste0('sample size: ', toString(num.samples)),
+                  palette = method.palette[3:6],
+                  #palette = method.palette,
+                  outlier.shape = NA) +
+        theme(plot.title = element_text(size=22))+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+    
+    ggsave(figure.name, plot = p3, width = 12, height = 7)
+    #print(p3)
+    
+    return(list(p1, p22, p3))
+    
+}
+
+
+## plot ratio of non-zero coefficients for informative features:
+plot.nonzero.informative = function (plot.data.info.raw){
+    
+    plot.data.melt = plot.data.info.raw[plot.data.info.raw$method %in% method.list[3:6], ]
+    plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list[3:6])
+    plot.data.melt$method = mapvalues(plot.data.melt$method, from = method.list[3:6], to = method.rename[3:6])
+    plot.data.melt$num.noise.predictors = factor(plot.data.melt$num.noise.predictors, levels = num.noise.predictors.list)
+    
+    plot.data.melt = plot.data.melt %>%
+        select(-c(predictors)) %>%
+        group_by(method, num.noise.predictors, boot) %>%
+        #summarise_all(funs(sum(.==0)/n()))
+        summarise_all(funs(sum(.!=0)))
+    
+    print(plot.data.melt)
+    
+    p = ggboxplot(data = plot.data.melt, x = "num.noise.predictors", y = "coefs.x", size = boxplot.size, point.size = 5,
+                  color = "method", add = "jitter", add.params = list(size = boxplot.point.size, alpha = .7), 
+                  notch = boxplot.notch, xlab = 'noise predictors', ylab = "number of nonzero coefficients (informative)",
+                  title = paste0('sample size: ', toString(num.samples)),
+                  palette = method.palette[3:6],
+                  #palette = method.palette,
+                  outlier.shape = NA) +
+        theme(plot.title = element_text(size=22))+
+        font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")
+    
+    return(p)
+    
+      
+}
+
+
+
+```
+
+## plot the difference, correlation betwwen ture and estimated coefficients for informative features
+## and ratio of zero estimates for the noise features:
+
+```{r, fig.height = 6, fig.width = 10, fig.align = "center"}
+
+
+num.samples = 200
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+method.rename  = c('Ridge', 'R-index Ridge', 'LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+#method.list = c( "lasso", "wlasso", "elasticnet", "welasticnet")
+#method.rename  = c('LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+#method.palette = c( "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+plot.data = summary.coefs(num.info.predictors, num.samples, nboots)
+plot.data.summary = plot.data[[1]]
+plot.data.noise.raw = plot.data[[2]]
+plot.data.info.raw.200 = plot.data[[3]]
+
+
+plot.list = plot.coefs.estimation(plot.data.summary, plot.data.noise.raw)
+p1 = plot.list[[1]]
+p2 = plot.list[[2]]
+p3 = plot.list[[3]]
+
+p31 = plot.nonzero.informative(plot.data.info.raw.200)
+
+num.samples = 500
+
+plot.data = summary.coefs(num.info.predictors, num.samples, nboots)
+plot.data.summary = plot.data[[1]]
+plot.data.noise.raw = plot.data[[2]]
+plot.data.info.raw.500 = plot.data[[3]]
+
+
+plot.list = plot.coefs.estimation(plot.data.summary, plot.data.noise.raw)
+p4 = plot.list[[1]]
+p5 = plot.list[[2]]
+p6 = plot.list[[3]]
+
+p61 = plot.nonzero.informative(plot.data.info.raw.500)
+
+```
+
+
+## merge the above plots:
+```{r, fig.height = 18, fig.width = 20}
+# classification:
+figure = ggarrange(p_acc1, p_acc2, p1, p4, p2, p5, 
+                   labels = c("A", "B", "C", "D", "E", "F"), font.label = list(size = 24, color = "black"),
+                   ncol = 2, nrow = 3, widths = c(1, 1))
+print(figure)
+ggsave(paste0("simulation_classification.png"))
+
+# regression:
+#figure = ggarrange(p_mae1, p_mae2, p_acc1, p_acc2, p1, p4, p3, p6, 
+#                   labels = c("A", "B", "C", "D", "E", "F", 'G', 'H'), font.label = list(size = 24, color = "black"),
+#                   ncol = 2, nrow = 4, widths = c(1, 1))
+#
+#print(figure)
+#ggsave(paste0("simulation_regression.png"))
+
+```
+
+```{r, fig.height = 12, fig.width = 20}
+#figure = ggarrange(p3, p6,
+#                   labels = c("A", "B"), font.label = list(size = 24, color = "black"),
+#                   ncol = 1, nrow = 2, widths = c(1, 1))
+
+figure = ggarrange(p31, p61, p3, p6,
+                   labels = c("A", "B", "C", "D"), font.label = list(size = 24, color = "black"),
+                   ncol = 2, nrow = 2, widths = c(1, 1))
+print(figure)
+ggsave(paste0("simulation_classification_noisepredictors2.png"))
+#ggsave(paste0("simulation_regression_noisepredictors2.png"))
+
+```
+
+## scatter plot of true and estimate coefs:
+
+```{r, fig.height = 20, fig.width = 30}
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+method.rename  = c('Ridge', 'R-index Ridge', 'LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+
+#method.list = c( "lasso", "wlasso", "elasticnet", "welasticnet")
+#method.rename  = c('LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+
+plot.scatter = function(plot.data.info.raw, num.samples) {
+
+    plot.data.info.raw = plot.data.info.raw[plot.data.info.raw$method %in% method.list, ]
+    plot.data.info.raw$method <- factor(plot.data.info.raw$method, levels = method.list)
+    plot.data.info.raw$method = mapvalues(plot.data.info.raw$method, from = method.list, to = method.rename)
+    #plot.data.info.raw$num.noise.predictors = factor(plot.data.info.raw$num.noise.predictors, levels = c(32, 64, 128, 256, 512, 1024, 2048))
+    plot.data.info.raw$num.noise.predictors = factor(plot.data.info.raw$num.noise.predictors, levels = c(64, 128, 256, 512))
+    
+    pscatter = ggscatter(plot.data.info.raw, x = "coefs.y", y = "coefs.x", 
+                         color = "method", palette = method.palette, 
+              cor.coef = F, cor.method = "kendall", cor.coef.size = 8,
+              add = 'reg.line', add.params = list(alpha = .5),
+              title = paste0('sample size: ', toString(num.samples)),
+              xlab = 'true beta', ylab = "estimated beta") + 
+        geom_abline(intercept = 0, slope = 1, color = 'red', linetype = "dashed", size = 1.5) +
+        facet_wrap(num.noise.predictors ~ method, scales = "free", nrow = 4) +
+        theme(legend.position='none') +
+        theme(plot.title = element_text(size=22))+
+        theme(strip.text = element_text(size = 22, colour = "black", angle = 0))+
+        theme(axis.line=element_line()) + 
+        font("xlab", size = 40, color = "black")+
+        font("ylab", size = 40, color = "black")+
+        font("xy.text", size = 25, color = "black")
+    
+    
+    print(pscatter)
+    return(pscatter)
+}
+
+pscatter = plot.scatter(plot.data.info.raw.200, 200)
+ggsave('scatter_plot_200.png', plot = pscatter, width = 30, height = 20)
+
+pscatter = plot.scatter(plot.data.info.raw.500, 500)
+ggsave('scatter_plot_500.png', plot = pscatter, width = 30, height = 20)
+
+
+```
+
+
+## distribution of noise predictors
+
+```{r, fig.width = 5, fig.height=20}
+## plot raw error:
+#plot.data.melt = plot.data.noise.raw[plot.data.noise.raw$method %in% method.list, ]
+#plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list)
+#plot.data.melt$method = mapvalues(plot.data.melt$method, from = method.list, to = method.rename)
+#
+#plot.data.melt$num.noise.predictors <- factor(plot.data.melt$num.noise.predictors, levels = factor(unique(plot.data.melt$num.noise.predictors)))
+#
+## display only nonzero values:
+#plot.data.melt = plot.data.melt[plot.data.melt$coefs!=0, ]
+#
+#p7 = ggdensity(data = plot.data.melt, x = "coefs", color = "method", add.params = list(size = .5), alpha = .9,
+#               xlab = 'estimated coefficients of noise predictors', ylab = "density",
+#              title = paste0('sample size: ', toString(num.samples)),
+#              palette = method.palette) +
+#    facet_wrap(~num.noise.predictors, scales = "free", nrow = 7)
+#    theme(plot.title = element_text(size=22))+
+#    font("xlab", size = 20, color = "black")+
+#    font("ylab", size = 20, color = "black")+
+#    font("xy.text", size = 15, color = "black")+
+#    font("legend.title", size = 18, color = "black", face = "bold")+
+#    font("legend.text", size = 18, color = "black")
+#
+#ggsave('density.png', plot = p6, width = 12, height = 7)
+#print(p7)
+```
+
+# density plot of esitmated noise features
+```{r, fig.height = 10, fig.width = 15, fig.align = "center"}
+
+#library(ggExtra)
+#library(ggplot2)
+#
+#
+#num.info.predictors = 20
+#num.samples = 500
+#nboots = 50
+#
+#num.noise.predictors.list = 2^seq(5, 11, by = 1)
+#num.predictors.list = num.info.predictors + num.noise.predictors.list
+#
+#method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+#method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+#
+#dir.name = paste("info_predictors_", toString(num.info.predictors), "_samples_", toString(num.samples), "_boots_", toString(nboots), sep = '')
+#
+## plots cannot be saved in for loop!!!!
+#    i = 6
+#    print(i)
+#
+#    plot.data = read.table(paste0(dir.name, .Platform$file.sep, "coefs_infopredictors_20_noisepredictors_", 
+#                                 toString(num.noise.predictors.list[i]), "_.csv", sep = ""), sep = ",", header = T)
+#    #print(plot.data)
+#    plot.data.noise = plot.data[plot.data$predictors>num.info.predictors,]
+#    plot.data.noise.method = plot.data.noise[plot.data.noise$method %in% method.list, ]
+#    plot.data.noise.beta = plot.data.noise[plot.data.noise$method %in% c("true_beta"), ]
+#    
+#    p2<-ggplot(plot.data.noise.method, aes(x = method, y=coefs, color=method, fill = method, group = method)) + 
+#        geom_point(alpha = .2, position = "jitter", size = 3) +
+#        geom_hline(data = plot.data.noise.beta, aes(yintercept=coefs), linetype="dashed", color = "red") + 
+#        theme(axis.title.x=element_blank(),
+#            axis.ticks.x=element_blank(), 
+#            legend.position = "none",
+#            text = element_text(size=20))
+#    #p2 = ggMarginal(p2, groupColour = TRUE, groupFill = TRUE, margins = "y")
+#    print(p2)
+#    
+#    p3<-ggplot(plot.data.noise.method, aes(x = coefs, color=method, fill = method, group = method)) + 
+#        geom_density(alpha = .4) +
+#        theme(axis.title.x=element_blank(),
+#              legend.position = "top",
+#            text = element_text(size=20))
+#    print(p3)
+#    
+```
+
+## plot raw coefficients:
+
+```{r, fig.height = 10, fig.width = 20, fig.align = "center"}
+
+#library(ggpubr)
+#library(ggplot2)
+#
+#
+#method.list = c("logistic", "ridge", "lasso",  "elasticnet")
+#method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C")
+#
+##method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+##method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+#
+##num.noise.predictors.list = c(0, 2^seq(5, 11, by = 1))
+#num.noise.predictors.list = 2^seq(5, 11, by = 1)
+#num.predictors.list = num.info.predictors + num.noise.predictors.list
+##for (i in 1:len.list){
+## plots cannot be save in for loop!!!!
+#    i = 2
+#    print(i)
+#
+#    plot.data = read.table(paste(dir.name, file.sep, "coefs_infopredictors_20_noisepredictors_", 
+#                                 toString(num.noise.predictors.list[i]), "_.csv", sep = ""), sep = ",", header = T)
+#    
+#    
+#    #print(plot.data)
+#    
+#    info.predictors.idx = plot.data[plot.data$method=='true_beta', 'coefs']!=0
+#    #plot.data$predictors[which(info.predictors.idx)] = num.info.predictors + 1
+#    plot.data.info = plot.data[plot.data$predictors %in% which(info.predictors.idx),]
+#    plot.data.noise = plot.data[plot.data$predictors %in% which(!info.predictors.idx),]
+#   
+#    plot.data.info.method = plot.data.info[plot.data.info$method %in% method.list, ]
+#    plot.data.info.method$method <- factor(plot.data.info.method$method, levels = method.list)
+#    plot.data.info.beta = plot.data.info[plot.data.info$method %in% c("true_beta"), ]
+#    
+#    
+#    png(paste(dir.name, file.sep, "plot_coefs_infopredictors_20_noisepredictors_",
+#              toString(num.noise.predictors.list[i]), ".png", sep = ""),
+#        width = 10, height = 5, units = 'in', res = 800, pointsize = 1)
+#    
+#    p = ggplot(plot.data.info.method, aes(x = method, y=coefs, color=method)) + 
+#        geom_jitter(size = .5) + 
+#        facet_wrap(~predictors, ncol = 5, scales = "free") +
+#        geom_hline(data = plot.data.info.beta, aes(yintercept=coefs), linetype="dashed", color = "red") +
+#        theme(axis.title.x=element_blank(),
+#            axis.text.x=element_blank(),
+#            axis.ticks.x=element_blank()) +
+#        labs(title = paste('noise predictors: ', toString(num.noise.predictors.list[i]), sep = ''))
+#        #scale_color_manual(values = method.palette)
+#            
+#    print(p)    
+#    dev.off()
+#    print(p)    
+#}
+
+```
+
+
+```{r}
+#print(dim(coef.ridge))
+#coef.ridge.mean = apply(coef.ridge, c(1,2), mean)
+#print(dim(coef.ridge.mean))
+#print(coef.ridge[,,1])
+#
+#heatmap(coef.ridge.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.ridge.mean[11:20,], Colv = NA, Rowv = NA)
+#
+#print(dim(coef.lasso))
+#coef.lasso.mean = apply(coef.lasso, c(1,2), mean)
+#print(dim(coef.lasso.mean))
+#print(coef.lasso[,,1])
+#
+#heatmap(coef.lasso.mean, Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[1:10,], Colv = NA, Rowv = NA)
+#heatmap(coef.lasso.mean[11:20,], Colv = NA, Rowv = NA)
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

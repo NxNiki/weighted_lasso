@@ -27,34 +27,67 @@ source("functions_reproducibility_index.R")
 #print(beta)
 
 num.info.predictors = 20
-num.samples = 200
+#num.samples = 200
+num.samples = 500
 
-num.noise.predictors.list = 2^seq(5, 10, by = 1)
+num.noise.predictors.list = 2^seq(6, 9, by = 1)
+#num.noise.predictors.list = 0
 #num.samples.list = seq(100, 1000, by = 100)
 
 nfolds = 5
 lambda.seq = 10^(seq(-3,1, length = 100))
-nboots = 50
+nboots = 100
 log.base = 10
 
+sim.family = 'binomial'
+sim.type = 'class'
+sim.type.measure = 'class'
 
-
+# classification:
+x.sd = 10
 #penalty.weight.method = 'kfold'
 penalty.weight.method = 'mean.diff.boot'
+
+# regression:
+#x.sd = 1
+#penalty.weight.method = 'corr.boot'
+
+#sim.family = 'gaussian'
+#sim.type = 'response'
+#sim.type.measure = 'mse'
 
 
 len.list = length(num.noise.predictors.list)
 #print(lambda.seq)
 
-x.sd = 10
 
-result.ridge = data.frame(matrix(NA, len.list, nboots))
-result.w.ridge = data.frame(matrix(NA, len.list, nboots))
-result.lasso = data.frame(matrix(NA, len.list, nboots))
-result.w.lasso = data.frame(matrix(NA, len.list, nboots))
-result.logistic = data.frame(matrix(NA, len.list, nboots))
-result.elasticnet = data.frame(matrix(NA, len.list, nboots))
-result.w.elasticnet = data.frame(matrix(NA, len.list, nboots))
+
+
+
+dir.name = paste("simulation_mvarnorm_", sim.family, "infopredictors", toString(num.info.predictors), 
+                 "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
+
+if (!file.exists(dir.name)){
+    dir.create(dir.name)
+}
+
+
+result.cor.ridge = data.frame(matrix(NA, len.list, nboots))
+result.cor.w.ridge = data.frame(matrix(NA, len.list, nboots))
+result.cor.lasso = data.frame(matrix(NA, len.list, nboots))
+result.cor.w.lasso = data.frame(matrix(NA, len.list, nboots))
+result.cor.logistic = data.frame(matrix(NA, len.list, nboots))
+result.cor.elasticnet = data.frame(matrix(NA, len.list, nboots))
+result.cor.w.elasticnet = data.frame(matrix(NA, len.list, nboots))
+
+result.mae.ridge = data.frame(matrix(NA, len.list, nboots))
+result.mae.w.ridge = data.frame(matrix(NA, len.list, nboots))
+result.mae.lasso = data.frame(matrix(NA, len.list, nboots))
+result.mae.w.lasso = data.frame(matrix(NA, len.list, nboots))
+result.mae.logistic = data.frame(matrix(NA, len.list, nboots))
+result.mae.elasticnet = data.frame(matrix(NA, len.list, nboots))
+result.mae.w.elasticnet = data.frame(matrix(NA, len.list, nboots))
+
 
 coef.ridge = vector("list", length = len.list) 
 coef.w.ridge = vector("list", length = len.list) 
@@ -77,10 +110,10 @@ for (i.list in 1:len.list){
     
     num.noise.predictors = num.noise.predictors.list[i.list]
     num.predictors = num.info.predictors + num.noise.predictors
-    penalty.cut.off = c((num.info.predictors+10)/num.predictors, (num.info.predictors+20)/num.predictors)
+    #penalty.cut.off = c((num.info.predictors+10)/num.predictors, (num.info.predictors+20)/num.predictors)
+    penalty.cut.off = c(0,1) # no cutoff.
     
-    print("noise predictors:")
-    print(num.noise.predictors)
+    
     
     ridge.coefs = matrix(NA, num.predictors, nboots)
     w.ridge.coefs = matrix(NA, num.predictors, nboots)
@@ -94,14 +127,21 @@ for (i.list in 1:len.list){
     set.seed(123)
     beta = c(runif(num.info.predictors, min = 0.2, max = 2)*sample(c(-1,1), num.info.predictors, replace = T),
              rep(0, num.noise.predictors))
+    
+    set.seed(111)
+    beta = sample(beta, length(beta))
+    
     coef.true[[i.list]] = beta
     
     for (i.boot in 1:nboots){
+        
+        print("noise predictors:")
+        print(num.noise.predictors)
 
         i.seed = (i.boot-1)*nboots + i.list
-        #print(num.noise.predictors)
+        print(i.boot)
         
-        sim.data = simulate_data(num.samples, beta, x.sd, seed = i.seed)
+        sim.data = simulate_data(num.samples, beta, x.sd, type = sim.type, seed = i.seed)
         
         
         set.seed(i.seed+111)
@@ -115,43 +155,50 @@ for (i.list in 1:len.list){
         x.test = sim.data$X[-train.idx,]
         y.test = sim.data$y[-train.idx]
         
-        logistic.fit = glm.fit(x.train, y.train, family = binomial(link = "logit"))
-        logistic.y.hat = predict.glm.fit(logistic.fit, x.test)
-        logistic.acc = compute.acc(y.test, logistic.y.hat)
+        #logistic.fit = glm.fit(x.train, y.train, family = binomial(link = "logit"))
+        #logistic.y.hat = predict.glm.fit(logistic.fit, x.test)
+        logistic.fit = glmnet(x.train, y.train, family = sim.family, alpha = 0, lambda = 0)
+        logistic.y.hat = predict(logistic.fit, x.test)
+        
+        logistic.acc = compute.acc(y.test, logistic.y.hat, sim.type)
         #print('logistic accuracy:')
         #print(logistic.acc)
-        result.logistic[i.list, i.boot] = logistic.acc[1]
-        #logistic.coefs[, i.boot] = coef(logistic.fit, s = logistic.fit$lambda.min)[-1]
-        logistic.coefs[, i.boot] = coef(logistic.fit)
+        result.mae.logistic[i.list, i.boot] = logistic.acc[1]
+        result.cor.logistic[i.list, i.boot] = logistic.acc[3]
+        logistic.coefs[, i.boot] = coef(logistic.fit)[-1]
         
         set.seed(i.seed+444)
-        ridge.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0, lambda = lambda.seq, type.measure = "class")
-        ridge.y.hat = predict(ridge.fit$glmnet.fit, x.test, s = ridge.fit$lambda.min, type = "class")
-        ridge.acc = compute.acc(y.test, ridge.y.hat)
-        #print('ridge accuracy:')
-        #print(ridge.acc)
+        ridge.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = 0, lambda = lambda.seq, type.measure = sim.type.measure)
+        ridge.y.hat = predict(ridge.fit$glmnet.fit, x.test, s = ridge.fit$lambda.min, type = sim.type)
+        ridge.acc = compute.acc(y.test, ridge.y.hat, sim.type)
+        print('ridge accuracy:')
+        print(ridge.acc)
         
-        result.ridge[i.list, i.boot] = ridge.acc[1]
+        result.mae.ridge[i.list, i.boot] = ridge.acc[1]
+        result.cor.ridge[i.list, i.boot] = ridge.acc[3]
         ridge.coefs[, i.boot] = coef(ridge.fit, s = ridge.fit$lambda.min)[-1]
         
         set.seed(i.seed+444)
-        lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class")
-        lasso.y.hat = predict(lasso.fit$glmnet.fit, x.test, s = lasso.fit$lambda.min, type = "class")
-        lasso.acc = compute.acc(y.test, lasso.y.hat)
+        lasso.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = 1, lambda = lambda.seq, type.measure =  sim.type.measure)
+        lasso.y.hat = predict(lasso.fit$glmnet.fit, x.test, s = lasso.fit$lambda.min, type = sim.type)
+        lasso.acc = compute.acc(y.test, lasso.y.hat, sim.type)
         
         #print('lasso accuracy:')
         #print(lasso.acc)
-        result.lasso[i.list, i.boot] = lasso.acc[1]
+        result.mae.lasso[i.list, i.boot] = lasso.acc[1]
+        result.cor.lasso[i.list, i.boot] = lasso.acc[3]
+        
         lasso.coefs[, i.boot] = coef(lasso.fit, s = lasso.fit$lambda.min)[-1]
         
         set.seed(i.seed+444)
-        elasticnet.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = .5, lambda = lambda.seq, type.measure = "class")
-        elasticnet.y.hat = predict(elasticnet.fit$glmnet.fit, x.test, s = elasticnet.fit$lambda.min, type = "class")
-        elasticnet.acc = compute.acc(y.test, elasticnet.y.hat)
+        elasticnet.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = .5, lambda = lambda.seq, type.measure =  sim.type.measure)
+        elasticnet.y.hat = predict(elasticnet.fit$glmnet.fit, x.test, s = elasticnet.fit$lambda.min, type = sim.type)
+        elasticnet.acc = compute.acc(y.test, elasticnet.y.hat, sim.type)
         
         #print('elasticnet accuracy:')
         #print(elasticnet.acc)
-        result.elasticnet[i.list, i.boot] = elasticnet.acc[1]
+        result.mae.elasticnet[i.list, i.boot] = elasticnet.acc[1]
+        result.cor.elasticnet[i.list, i.boot] = elasticnet.acc[3]
         elasticnet.coefs[, i.boot] = coef(elasticnet.fit, s = elasticnet.fit$lambda.min)[-1]
         
         # weighted lasso model:
@@ -159,36 +206,47 @@ for (i.list in 1:len.list){
             penalty.weight = feature.weight.mean.diff.boot(x.train, y.train, nboots = 100, cutoff = penalty.cut.off, log.base = log.base)
         } else if (penalty.weight.method == 'kfold'){
             penalty.weight = feature.weight.mean.diff.kfold(x.train, y.train, k = 10, cutoff = penalty.cut.off, log.base = log.base)
+        } else if (penalty.weight.method == 'corr.boot'){
+            penalty.weight = feature.weight.corr.boot(x.train, y.train, nboots = 100, cutoff = penalty.cut.off, log.base = log.base)
         }
         
         set.seed(111)
-        w.lasso.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 1, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
-        w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = "class")
-        w.lasso.acc = compute.acc(y.test, w.lasso.y.hat)
+        w.lasso.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = 1, lambda = lambda.seq, 
+                                type.measure =  sim.type.measure,
+                                penalty.factor = penalty.weight)
+        w.lasso.y.hat = predict(w.lasso.fit$glmnet.fit, x.test, s = w.lasso.fit$lambda.min, type = sim.type)
+        w.lasso.acc = compute.acc(y.test, w.lasso.y.hat, sim.type)
         #print('weighted lasso accuracy:')
         #print(w.lasso.acc)
         
-        result.w.lasso[i.list, i.boot] = w.lasso.acc[1]
+        result.mae.w.lasso[i.list, i.boot] = w.lasso.acc[1]
+        result.cor.w.lasso[i.list, i.boot] = w.lasso.acc[3]
         w.lasso.coefs[, i.boot] = coef(w.lasso.fit, s = w.lasso.fit$lambda.min)[-1]
         
         set.seed(i.seed+444)
-        w.ridge.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
-        w.ridge.y.hat = predict(w.ridge.fit$glmnet.fit, x.test, s = w.ridge.fit$lambda.min, type = "class")
-        w.ridge.acc = compute.acc(y.test, w.ridge.y.hat)
+        w.ridge.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = 0, lambda = lambda.seq, 
+                                type.measure =  sim.type.measure,
+                                penalty.factor = penalty.weight)
+        w.ridge.y.hat = predict(w.ridge.fit$glmnet.fit, x.test, s = w.ridge.fit$lambda.min, type = sim.type)
+        w.ridge.acc = compute.acc(y.test, w.ridge.y.hat, sim.type)
         #print('weighted ridge accuracy:')
         #print(w.ridge.acc)
         
-        result.w.ridge[i.list, i.boot] = w.ridge.acc[1]
+        result.mae.w.ridge[i.list, i.boot] = w.ridge.acc[1]
+        result.cor.w.ridge[i.list, i.boot] = w.ridge.acc[3]
         w.ridge.coefs[, i.boot] = coef(w.ridge.fit, s = w.ridge.fit$lambda.min)[-1]
         
         set.seed(i.seed+555)
-        w.elasticnet.fit = cv.glmnet(x.train, y.train, family = "binomial", alpha = 0.5, lambda = lambda.seq, type.measure = "class", penalty.factor = penalty.weight)
-        w.elasticnet.y.hat = predict(w.elasticnet.fit$glmnet.fit, x.test, s = w.elasticnet.fit$lambda.min, type = "class")
-        w.elasticnet.acc = compute.acc(y.test, w.elasticnet.y.hat)
+        w.elasticnet.fit = cv.glmnet(x.train, y.train, family = sim.family, alpha = 0.5, lambda = lambda.seq,
+                                     type.measure =  sim.type.measure,
+                                     penalty.factor = penalty.weight)
+        w.elasticnet.y.hat = predict(w.elasticnet.fit$glmnet.fit, x.test, s = w.elasticnet.fit$lambda.min, type = sim.type)
+        w.elasticnet.acc = compute.acc(y.test, w.elasticnet.y.hat, sim.type)
         #print('weighted elasticnet accuracy:')
         #print(w.elasticnet.acc)
         
-        result.w.elasticnet[i.list, i.boot] = w.elasticnet.acc[1]
+        result.mae.w.elasticnet[i.list, i.boot] = w.elasticnet.acc[1]
+        result.cor.w.elasticnet[i.list, i.boot] = w.elasticnet.acc[3]
         w.elasticnet.coefs[, i.boot] = coef(w.elasticnet.fit, s = w.elasticnet.fit$lambda.min)[-1]
     
     }
@@ -206,44 +264,76 @@ coef.w.elasticnet[[i.list]] = w.elasticnet.coefs
 
 ## save results:
 
-result.ridge$method = rep("ridge", 1, nrow(result.ridge))
-result.ridge$num.noise.predictors = num.noise.predictors.list
+result.mae.ridge$method = rep("ridge", 1, nrow(result.mae.ridge))
+result.mae.ridge$num.noise.predictors = num.noise.predictors.list
 
-result.w.ridge$method = rep("wridge", 1, nrow(result.w.ridge))
-result.w.ridge$num.noise.predictors = num.noise.predictors.list
+result.mae.w.ridge$method = rep("wridge", 1, nrow(result.mae.w.ridge))
+result.mae.w.ridge$num.noise.predictors = num.noise.predictors.list
 
-result.lasso$method = rep("lasso", 1, nrow(result.lasso))
-result.lasso$num.noise.predictors = num.noise.predictors.list
+result.mae.lasso$method = rep("lasso", 1, nrow(result.mae.lasso))
+result.mae.lasso$num.noise.predictors = num.noise.predictors.list
 
 #result.all = rbind(result.ridge, result.lasso)
 
-result.w.lasso$method = rep("wlasso", 1, nrow(result.w.lasso))
-result.w.lasso$num.noise.predictors = num.noise.predictors.list
+result.mae.w.lasso$method = rep("wlasso", 1, nrow(result.mae.w.lasso))
+result.mae.w.lasso$num.noise.predictors = num.noise.predictors.list
 
-result.logistic$method = rep("logistic", 1, nrow(result.lasso))
-result.logistic$num.noise.predictors = num.noise.predictors.list
+result.mae.logistic$method = rep("logistic", 1, nrow(result.mae.logistic))
+result.mae.logistic$num.noise.predictors = num.noise.predictors.list
 
-result.elasticnet$method = rep("elasticnet", 1, nrow(result.elasticnet))
-result.elasticnet$num.noise.predictors = num.noise.predictors.list
+result.mae.elasticnet$method = rep("elasticnet", 1, nrow(result.mae.elasticnet))
+result.mae.elasticnet$num.noise.predictors = num.noise.predictors.list
 
-result.w.elasticnet$method = rep("welasticnet", 1, nrow(result.elasticnet))
-result.w.elasticnet$num.noise.predictors = num.noise.predictors.list
+result.mae.w.elasticnet$method = rep("welasticnet", 1, nrow(result.mae.w.elasticnet))
+result.mae.w.elasticnet$num.noise.predictors = num.noise.predictors.list
 
-result.all = rbind(result.ridge, result.w.ridge, 
-                   result.lasso, result.w.lasso, 
-                   result.logistic, 
-                   result.elasticnet, result.w.elasticnet)
+result.mae.all = rbind(result.mae.ridge, result.mae.w.ridge, 
+                   result.mae.lasso, result.mae.w.lasso, 
+                   result.mae.logistic, 
+                   result.mae.elasticnet, result.mae.w.elasticnet)
 
-dir.name = paste("info_predictors", toString(num.info.predictors), "samples", toString(num.samples), "boots", toString(nboots), sep = '_')
-if (!file.exists(dir.name)){
-    dir.create(dir.name)
-}
 
-file.name = paste("prediction_accuracy", penalty.weight.method, "x", toString(x.sd), ".csv", sep = "_")
+# correlation:
+result.cor.ridge$method = rep("ridge", 1, nrow(result.cor.ridge))
+result.cor.ridge$num.noise.predictors = num.noise.predictors.list
 
-#print(result.all)
+result.cor.w.ridge$method = rep("wridge", 1, nrow(result.cor.w.ridge))
+result.cor.w.ridge$num.noise.predictors = num.noise.predictors.list
+
+result.cor.lasso$method = rep("lasso", 1, nrow(result.cor.lasso))
+result.cor.lasso$num.noise.predictors = num.noise.predictors.list
+
+#result.all = rbind(result.ridge, result.lasso)
+
+result.cor.w.lasso$method = rep("wlasso", 1, nrow(result.cor.w.lasso))
+result.cor.w.lasso$num.noise.predictors = num.noise.predictors.list
+
+result.cor.logistic$method = rep("logistic", 1, nrow(result.cor.logistic))
+result.cor.logistic$num.noise.predictors = num.noise.predictors.list
+
+result.cor.elasticnet$method = rep("elasticnet", 1, nrow(result.cor.elasticnet))
+result.cor.elasticnet$num.noise.predictors = num.noise.predictors.list
+
+result.cor.w.elasticnet$method = rep("welasticnet", 1, nrow(result.cor.w.elasticnet))
+result.cor.w.elasticnet$num.noise.predictors = num.noise.predictors.list
+
+result.cor.all = rbind(result.cor.ridge, result.cor.w.ridge, 
+                   result.cor.lasso, result.cor.w.lasso, 
+                   result.cor.logistic, 
+                   result.cor.elasticnet, result.cor.w.elasticnet)
+
+
 file.sep = .Platform$file.sep
-write.table(result.all, paste(dir.name, file.sep, file.name, sep = '') , row.names = F, sep = ",")
+# correlation and mae for regression problem:
+#file.name = paste("prediction_accuracy_mae", penalty.weight.method, "x", toString(x.sd), ".csv", sep = "_")
+#write.table(result.mae.all, paste(dir.name, file.sep, file.name, sep = '') , row.names = F, sep = ",")
+#
+#file.name = paste("prediction_accuracy_cor", penalty.weight.method, "x", toString(x.sd), ".csv", sep = "_")
+#write.table(result.cor.all, paste(dir.name, file.sep, file.name, sep = '') , row.names = F, sep = ",")
+
+# this is actually prediction accuracy for classification (did not change the variable name as there are many of them):
+file.name = paste("prediction_accuracy", penalty.weight.method, "x", toString(x.sd), ".csv", sep = "_")
+write.table(result.cor.all, paste(dir.name, file.sep, file.name, sep = '') , row.names = F, sep = ",")
 
 library(reshape2)
 ## save coefs:
@@ -300,386 +390,4 @@ for (i in 1:len.list){
 }
 ```
 
-## plot prediction accuracy:
-```{r, fig1, fig.width = 10, fig.height= 5}
-library(ggpubr)
-library(ggplot2)
-library(scales)
-library(reshape2)
-
-num.info.predictors = 20
-num.samples = 500
-nboots = 500
-
-#method.list = c("logistic", "ridge", "lasso", "wridge", "wlasso", "elasticnet")
-#method.list = c("logistic", "ridge", "lasso", "elasticnet", "wridge", "wlasso", "welasticnet")
-method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
-
-method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
-
-
-#result.all = read.table(paste(dir.name, file.sep, "result_ridge_lasso_wlasso_logistic.csv", sep = ""), sep = ",", header = T)
-
-dir.name = paste("info_predictors_", toString(num.info.predictors), "_samples_", toString(num.samples), "_boots_", toString(nboots), sep = '')
-file.sep = .Platform$file.sep
-result.all = read.table(paste(dir.name, file.sep, "prediction_accuracy_mean.diff.boot_x_10_.csv", sep = ""), sep = ",", header = T)
-
-#result.all = read.table(paste(dir.name, file.sep, "result_ridge_lasso_wlasso_logistic_kfold_beta_", toString(beta.sd), "x_", toString(x.sd), "noise_", toString(noise.sd), ".csv", sep = ""), sep = ",", header = T)
-
-
-result.plot = melt(result.all, id.vars = c("num.noise.predictors", "method"), variable.name = "boot.idx", value.name = "accuracy")
-result.plot = result.plot[, c(1,2,4)]
-result.plot$num.noise.predictors = as.factor(result.plot$num.noise.predictors)
-result.plot = result.plot[result.plot$method %in% method.list, ]
-
-result.plot$method <- factor(result.plot$method, levels = method.list)
-
-#print(result.plot)
-
-#ggboxplot(result.plot, x = "num.noise.predictors", y = "accuracy", color = "method", add = "jitter", palette = "joc")
-
-#ggline(result.plot, x = "num.noise.predictors", y = "accuracy", group = "method", color = "method", shape = "method",
-#       add = c("mean_se", "jitter"), palette = "joc")
-
-result.all$mean = apply(result.all[,1:nboots], 1, mean)
-result.all$se = apply(result.all[,1:nboots], 1, sd)/sqrt(nboots)
-
-result.all = result.all[result.all$method %in% method.list, ]
-
-
-figure.name = paste0(dir.name, file.sep, 'prediction_accuracy_infopred_', 
-                     toString(num.info.predictors), '_boots_', toString(nboots), '.jpg')
-#pd <- position_dodge(0) # move them .05 to the left and right
-#p = ggplot(result.all, aes(x=num.noise.predictors, y=mean, colour=method, group=method)) + 
-#        #scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x), labels = trans_format("log2", math_format(2^.x))) +
-#        scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x)) +
-#        geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position=pd) +
-#        geom_line(position=pd) +
-#        geom_point(position=pd, size=1) +
-#        labs(y = "prediction accuracy", 
-#             x = "number of noise predictors",
-#             title = paste('sample size:', toString(num.samples), sep = ''))
-
-
-#p = ggplot(result.plot, aes(x=num.noise.predictors, y=accuracy, colour=method, fill = method)) + 
-#        geom_boxplot(position=position_dodge(0.8)) +
-#        #geom_jitter(position=position_dodge(0.8)) +
-#        labs(y = "prediction accuracy", 
-#             x = "number of noise predictors",
-#             title = paste('sample size:', toString(num.samples), sep = ''))
-#
-
-p = ggboxplot(data = result.plot, x = "num.noise.predictors", y = "accuracy", 
-              color = "method", add = "jitter", add.params = list(size = .5), 
-              notch = T, palette = method.palette,
-              title = paste0('sample size: ', toString(num.samples))) +
-    font("xlab", size = 20, color = "black")+
-    font("ylab", size = 20, color = "black")+
-    font("xy.text", size = 15, color = "black")+
-    font("legend.title", size = 18, color = "black", face = "bold")+
-    font("legend.text", size = 18, color = "black")
-
-ggsave(figure.name, plot = p, width = 12, height = 7)
-print(p)
-```
-
-## plot raw coefficients:
-
-```{r, fig.height = 10, fig.width = 20, fig.align = "center"}
-
-library(ggpubr)
-library(ggplot2)
-
-
-num.noise.predictors.list = 2^seq(5, 10, by = 1)
-num.predictors.list = num.info.predictors + num.noise.predictors.list
-#for (i in 1:len.list){
-# plots cannot be save in for loop!!!!
-    i = 4
-    print(i)
-
-    plot.data = read.table(paste(dir.name, file.sep, "coefs_infopredictors_20_noisepredictors_", 
-                                 toString(num.noise.predictors.list[i]), "_.csv", sep = ""), sep = ",", header = T)
-    
-    plot.data$method <- factor(plot.data$method, levels = method.list)
-    #print(plot.data)
-    
-    #plot.data$predictors[plot.data$predictors>num.info.predictors] = num.info.predictors + 1
-    plot.data.info = plot.data[plot.data$predictors<=num.info.predictors,]
-    plot.data.noise = plot.data[plot.data$predictors>num.info.predictors,]
-   
-    plot.data.info.method = plot.data.info[plot.data.info$method %in% method.list, ]
-    plot.data.info.beta = plot.data.info[plot.data.info$method %in% c("true_beta"), ]
-    
-    
-    png(paste(dir.name, file.sep, "plot_coefs_infopredictors_20_noisepredictors_", toString(num.noise.predictors.list[i]), ".png", sep = ""),
-        width = 10, height = 5, units = 'in', res = 800, pointsize = 1)
-    p = ggplot(plot.data.info.method, aes(x = method, y=coefs, color=method, fill = method, group = method, )) + 
-            geom_jitter(size = .5) + facet_wrap(~as.factor(predictors), ncol = 5, scales = "free") +
-            geom_hline(data = plot.data.info.beta, aes(yintercept=coefs), linetype="dashed", color = "red") + 
-            theme(axis.title.x=element_blank(),
-                axis.text.x=element_blank(),
-                axis.ticks.x=element_blank()) +
-            labs(title = paste('noise predictors: ', toString(num.noise.predictors.list[i]), sep = '')) +
-            scale_color_manual(values = method.palette)
-    print(p)    
-    dev.off()
-    print(p)    
-#}
-```
-
-## plot mean and sd of the difference betwwen ture and estimated coefficients:
-
-```{r, fig.height = 6, fig.width = 10, fig.align = "center"}
-
-library(ggpubr)
-library(ggplot2)
-library(dplyr)
-
-num.info.predictors = 20
-num.samples = 200
-nboots = 50
-
-dir.name = paste("info_predictors_", toString(num.info.predictors), "_samples_", toString(num.samples), "_boots_", toString(nboots), sep = '')
-
-num.noise.predictors.list = 2^seq(5, 10, by = 1)
-num.predictors.list = num.info.predictors + num.noise.predictors.list
-
-for (i in 1:length(num.predictors.list)) {
-    num.pred = toString(num.noise.predictors.list[i])
-    plot.data = read.table(paste(dir.name, file.sep, "coefs_infopredictors_20_noisepredictors_",num.pred, "_.csv", sep = ""), 
-                           sep = ",", header = T)
-    
-    # select true beta coefficients:
-    true_beta = plot.data[plot.data$predictors<=num.info.predictors & plot.data$method=='true_beta', 'coefs']  
-    #print(length(true_beta))
-    # select estimated coefs of info predictors:
-    plot.data.info = plot.data[plot.data$predictors<=num.info.predictors & plot.data$method!='true_beta',]
-    plot.data.noise = plot.data[plot.data$predictors>num.info.predictors & plot.data$method!='true_beta',]
-    
-    # compute mean and se across noise predictors:
-    plot.data.noise.mean = plot.data.noise %>%
-        group_by(method, boot) %>%
-        #select(-c('predictors')) %>%
-        summarise_all(funs(mean))
-    
-    #print(dim(plot.data.info))
-    new_name = paste("coefs.corr", num.pred, sep = '.')
-    if (i==1){
-        plot.data.all = plot.data.info
-        plot.data.noise.all = plot.data.noise.mean
-        # correlation of estimated and true coeficients:
-        plot.data.corr = plot.data.info %>%
-            select(c('method', 'boot'))
-    }
-    
-    # error of coeficients for infomative features:
-    plot.data.all[[paste('coefs.error', num.pred, sep = '.')]] = abs(true_beta - plot.data.info$coefs)/abs(true_beta)
-    
-    # coefs for noise features:
-    plot.data.noise.all[[paste('coefs.error', num.pred, sep = '.')]] = plot.data.noise.mean$coefs
-    
-    # correlation between ture and estimated coefficients for informative features:
-    plot.data.corr = plot.data.info %>%
-        select(-c('predictors')) %>%
-        group_by(method, boot) %>%
-        summarise_all(funs(cor(., true_beta))) %>%
-        rename(!!new_name := 'coefs') %>%
-        left_join(plot.data.corr, by = c('method', 'boot'))
-
-    
-}
-#print(plot.data)
-
-# compute mean across predictors:
-plot.data.summary = plot.data.all %>%
-    group_by(method, boot) %>%
-    summarise_all(list(mean))
-
-plot.data.summary = within(plot.data.summary, rm(predictors, coefs, boot))
-plot.data.summary = plot.data.summary[plot.data.summary$method %in% method.list, ]
-plot.data.melt = melt(plot.data.summary, id_vars = c('method'))
-plot.data.melt$variable = as.numeric(gsub('coefs.error.', '', plot.data.melt$variable))
-
-plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list)
-
-plot.data.mean = plot.data.melt %>%
-    group_by(method, variable) %>%
-    summarise_all(funs(mean, se=sd(.)/sqrt(n())))
-
-
-figure.name = paste0(dir.name, file.sep, "plot_coefs_error_infopredictors_20_", 
-                     "sample_", toString(num.samples), ".jpg")
-#pd <- position_dodge(0) # move them .05 to the left and right
-#
-#p = ggplot(plot.data.mean, aes(x = variable, y=mean, group = method, color = method)) + 
-#    #scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x), labels = trans_format("log2", math_format(2^.x))) +
-#    scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x)) +
-#    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position=pd) +
-#    geom_line(position=pd) +
-#    geom_point(position=pd, size=1) +
-#    #scale_y_reverse() +
-#    labs(title = paste('error of coefficients. (sample size: ', toString(num.samples), ')', sep = ''),
-#         x = 'number of noise predictors', 
-#         y = 'error of coefficients')
-
-p = ggboxplot(data = plot.data.melt, x = "variable", y = "value", 
-              color = "method", add = "jitter", add.params = list(size = .5), 
-              notch = T, xlab = 'noise predictors', ylab = 'error of coefficients', 
-              palette = method.palette,
-              title = paste0('sample size: ', toString(num.samples))) +
-    font("xlab", size = 20, color = "black")+
-    font("ylab", size = 20, color = "black")+
-    font("xy.text", size = 15, color = "black")+
-    font("legend.title", size = 18, color = "black", face = "bold")+
-    font("legend.text", size = 18, color = "black")
-
-ggsave(figure.name, plot = p, width = 12, height = 7)
-print(p)
-    
-
-plot.data.summary = within(plot.data.corr, rm(boot))
-plot.data.summary = plot.data.summary[plot.data.summary$method %in% method.list, ]
-plot.data.melt = melt(plot.data.summary, id_vars = c('method'))
-plot.data.melt$variable = as.numeric(gsub('coefs.corr.', '', plot.data.melt$variable))
-plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list)
-
-plot.data.mean = plot.data.melt %>%
-    group_by(method, variable) %>%
-    summarise_all(funs(mean(., na.rm = T), se=sd(., na.rm = T)/sqrt(n())))
-
-
-figure.name = paste0(dir.name, file.sep, "plot_coefs_corr_infopredictors_20_", 
-                     "sample_", toString(num.samples), ".jpg")
-
-#pd <- position_dodge(0) # move them .05 to the left and right
-#
-#p = ggplot(plot.data.mean, aes(x = variable, y=mean, group = method, color = method)) + 
-#    #scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x), labels = trans_format("log2", math_format(2^.x))) +
-#    scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x)) + 
-#    ylim(.85, 1) +
-#    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position=pd) +
-#    geom_line(position=pd) +
-#    geom_point(position=pd, size=1) +
-#    
-#    labs(title = paste('correlation between estimated and true coefficients. (sample size: ', toString(num.samples), ')', sep = ''),
-#         x = 'number of noise predictors', 
-#         y = "Pearson's r")
-
-p = ggboxplot(data = plot.data.melt, x = "variable", y = "value", 
-              color = "method", add = "jitter", add.params = list(size = .5), 
-              notch = T, xlab = 'noise predictors', ylab = "Pearson's R",
-              palette = method.palette,
-              title = paste0('sample size: ', toString(num.samples))) +
-    font("xlab", size = 20, color = "black")+
-    font("ylab", size = 20, color = "black")+
-    font("xy.text", size = 15, color = "black")+
-    font("legend.title", size = 18, color = "black", face = "bold")+
-    font("legend.text", size = 18, color = "black")
-
-ggsave(figure.name, plot = p, width = 12, height = 7)
-print(p)
-
-
-# plot mean and std error of estimated noise coefficients:
-# compute mean across boots:
-
-
-plot.data.summary = within(plot.data.noise.all, rm(coefs, boot, predictors))
-plot.data.summary = plot.data.summary[plot.data.summary$method %in% method.list, ]
-plot.data.melt = melt(plot.data.summary, id_vars = c('method'))
-plot.data.melt$variable = as.numeric(gsub('coefs.error.', '', plot.data.melt$variable))
-plot.data.melt$method <- factor(plot.data.melt$method, levels = method.list)
-
-plot.data.mean = plot.data.melt %>%
-    group_by(method, variable) %>%
-    summarise_all(funs(mean, se=sd(.)/sqrt(n())))
-    
-
-figure.name = paste0(dir.name, file.sep, "plot_coefs_error_noisepredictors_20_", 
-                     "sample_", toString(num.samples), ".jpg")
-
-#pd <- position_dodge(0) # move them .05 to the left and right
-
-#p = ggplot(plot.data.mean, aes(x = variable, y=mean, group = method, color = method)) + 
-#    #scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x), labels = trans_format("log2", math_format(2^.x))) +
-#    scale_x_log10(breaks = trans_breaks("log2", function(x) 2^x)) +
-#    geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1, position=pd) +
-#    geom_line(position=pd) +
-#    geom_point(position=pd, size=1) + ylim(-5e-3, 2e-3)
-#    
-#    labs(title = paste('mean of estimated noise coefficients. (sample size: ', toString(num.samples), ')', sep = ''),
-#         x = 'number of noise predictors', 
-#         y = "mean coeffcients")
-
-p = ggboxplot(data = plot.data.melt, x = "variable", y = "value", 
-              color = "method", add = "jitter", add.params = list(size = .5), 
-              notch = T, xlab = 'number of noise predictors', ylab = "esitmates of noise predictors",
-              title = paste0('sample size: ', toString(num.samples)),
-              palette = method.palette) +
-    font("xlab", size = 20, color = "black")+
-    font("ylab", size = 20, color = "black")+
-    font("xy.text", size = 15, color = "black")+
-    font("legend.title", size = 18, color = "black", face = "bold")+
-    font("legend.text", size = 18, color = "black")
-
-ggsave(figure.name, plot = p, width = 12, height = 7)
-print(p)
-```
-
-
-## distribution of noise predictors
-```{r, fig.height = 10, fig.width = 15, fig.align = "center"}
-
-library(ggExtra)
-
-# plots cannot be save in for loop!!!!
-    i = 6
-    print(i)
-
-    plot.data = read.table(paste(dir.name, file.sep, "coefs_infopredictors_20_noisepredictors_", 
-                                 toString(num.noise.predictors.list[i]), "_.csv", sep = ""), sep = ",", header = T)
-    #print(plot.data)
-    plot.data.noise = plot.data[plot.data$predictors>num.info.predictors,]
-    plot.data.noise.method = plot.data.noise[plot.data.noise$method %in% method.list, ]
-    plot.data.noise.beta = plot.data.noise[plot.data.noise$method %in% c("true_beta"), ]
-    
-    p2<-ggplot(plot.data.noise.method, aes(x = method, y=coefs, color=method, fill = method, group = method)) + 
-        geom_point(alpha = .2, position = "jitter", size = 3) +
-        geom_hline(data = plot.data.noise.beta, aes(yintercept=coefs), linetype="dashed", color = "red") + 
-        theme(axis.title.x=element_blank(),
-            axis.ticks.x=element_blank(), 
-            legend.position = "none",
-            text = element_text(size=20))
-    #p2 = ggMarginal(p2, groupColour = TRUE, groupFill = TRUE, margins = "y")
-    print(p2)
-    
-    p3<-ggplot(plot.data.noise.method, aes(x = coefs, color=method, fill = method, group = method)) + 
-        geom_density(alpha = .4) +
-        theme(axis.title.x=element_blank(),
-              legend.position = "top",
-            text = element_text(size=20))
-    print(p3)
-    
-```
-
-```{r}
-#print(dim(coef.ridge))
-#coef.ridge.mean = apply(coef.ridge, c(1,2), mean)
-#print(dim(coef.ridge.mean))
-#print(coef.ridge[,,1])
-#
-#heatmap(coef.ridge.mean, Colv = NA, Rowv = NA)
-#heatmap(coef.ridge.mean[1:10,], Colv = NA, Rowv = NA)
-#heatmap(coef.ridge.mean[11:20,], Colv = NA, Rowv = NA)
-#
-#print(dim(coef.lasso))
-#coef.lasso.mean = apply(coef.lasso, c(1,2), mean)
-#print(dim(coef.lasso.mean))
-#print(coef.lasso[,,1])
-#
-#heatmap(coef.lasso.mean, Colv = NA, Rowv = NA)
-#heatmap(coef.lasso.mean[1:10,], Colv = NA, Rowv = NA)
-#heatmap(coef.lasso.mean[11:20,], Colv = NA, Rowv = NA)
-```
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

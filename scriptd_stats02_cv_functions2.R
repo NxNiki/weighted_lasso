@@ -1,85 +1,19 @@
 #!/usr/bin/env Rscript
 
-# this is old version. see scriptd_stats02_cv_functions2.R (with functions for reproducibility index in a seperated file.)
+# this is newer version of scriptd_stats02_cv_functions.R, with functions for reproducibility index
+# in a seperated file: functions_reproducibility_index.R, as we don't need functions in this file 
+# for the simulation analysis.
+
 # xin niu 03-05-2020.
+
+# run cross validation on brain imaging data.
+# calls functions_reproducibility_index.R to compute feature weights.
+# called by scriptd_stats03_**_cv.R
+
+source('functions_reproducibility_index.R')
 
 library(caret)
 # createFolds()
-
-
-
-scale.0.1 = function(dat) {
-    # the output will be coerced to matrix.
-    
-    dat = as.matrix(dat)
-    
-    mins = apply(dat, 2, min)
-    maxs = apply(dat, 2, max)
-    
-    scaled.dat = scale(dat, center = mins, scale = maxs - mins)
-    return(scaled.dat)
-}
-
-
-compute.acc = function(y, yhat) {
-    y = as.numeric(y)
-    yhat = as.numeric(yhat)
-    
-    acc <- sum(y == yhat, na.rm = TRUE) / length(y)
-    
-    ylevel = sort(unique(yhat), decreasing = F)
-    
-    if (length(ylevel) == 2) {
-        # asuming ylevel = c(0, 1)
-        sensi <- sum(y == yhat & y == ylevel[2], na.rm = TRUE) / sum(y == ylevel[2], na.rm = TRUE)
-        speci <- sum(y == yhat & y == ylevel[1], na.rm = TRUE) / sum(y == ylevel[1], na.rm = TRUE)
-    }
-    else if (length(ylevel==1)&max(y)==ylevel){
-        print('compute.acc: 1 level of yhat')
-        sensi <- 1
-        speci <- NaN
-    }
-    else if (length(ylevel==1)&min(y)==ylevel){
-        print('compute.acc: 1 level of yhat')
-        sensi <- NaN
-        speci <- 1
-    }
-    else {
-        print('compute.acc: more than 2 levels of yhat')
-        sensi <- NaN
-        speci <- NaN
-    }
-    
-    temp <- c(acc, sensi, speci)
-    return(temp)
-}
-
-#compute.acc = function(y, yhat) {
-#    y = as.numeric(y)
-#    yhat = as.numeric(yhat)
-#    
-#    acc <- sum(y == yhat) / length(y)
-#    
-#    ylevel = sort(unique(y), decreasing = F)
-#    
-#    if (length(ylevel) == 2) {
-#        # asuming ylevel = c(0, 1)
-#        sensi <-
-#            sum(y == yhat & y == ylevel[2]) / sum(y == ylevel[2])
-#        speci <-
-#            sum(y == yhat & y == ylevel[1]) / sum(y == ylevel[1])
-#    }
-#    else if (max(yhat) == max(y)) {
-#        sensi <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
-#        speci <- NaN
-#    } else{
-#        speci <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
-#        sensi <- NaN
-#    }
-#    
-#    temp <- c(acc, sensi, speci)
-#    return(temp)
-#}
 
 remap.factor = function(f, min = 0, max = 1) {
     f = as.numeric(f)
@@ -127,235 +61,6 @@ perm.t.test = function(x1, x2, n = 5000, paired = F) {
     
     return(test.out)
 }
-
-
-library(VGAM)
-# t.test()
-# cor.test()
-
-library(ltm)
-# biserial.cor()
-
-#library(matrixcalc)
-## matrix.inverse()
-
-#library(MASS)
-# ginv()
-
-feature.weight.mean.diff.boot = function(x, y, nboots){
-    print("compute feature weight: mean.diff.boot...")
-    f.w.boot = matrix(NA, nboots, ncol(x))
-    
-    y = remap.factor(y, 0, 1)
-    for (i in 1:nboots) {
-        set.seed(i)
-        boot.idx = sample(1:nrow(x), nrow(x), replace = T)
-        
-        x.boot = x[boot.idx,]
-        y.boot = y[boot.idx]
-        
-        mean1 = apply(x.boot[y.boot==0,], 2, mean)
-        mean2 = apply(x.boot[y.boot==1,], 2, mean)
-        f.w.boot[i, ] =mean1 - mean2
-    }
-    return(f.w.boot)
-    
-}
-
-feature.cv.test.pca = function(feature.in,
-                               factor,
-                               k = 10,
-                               ncomp = 10,
-                               method = "wilcox") {
-    
-    pca.out = prcomp(feature.in, scale = F, center = F)
-    feature.pca = pca.out$x
-    
-    feature.weight.pca = feature.cv.test(feature.pca, factor, k, method)
-    #inv.rotation = ginv(pca.out$rotation[, 1:length(feature.weight.pca)])
-    inv.rotation = ginv(pca.out$rotation[, 1:ncomp])
-    feature.weight = feature.weight.pca[1:ncomp] %*% inv.rotation
-    
-    return(feature.weight)
-}
-
-feature.cv.test = function(feature.in,
-                           factor,
-                           k = 10,
-                           method = "wilcox",
-                           glmnet.para,
-                           seed = 111) {
-    # statistic tests to compute feature weights: if k == 1, run test on the whole
-    # sample without cross validation. the output is a vector with length same as
-    # the number of features i.e ncol(feature.in) this is useful in case we do boot
-    # strapping and compute coefficient of variation (CV) across boot strap samples.
-    
-    num.feature = ncol(feature.in)
-    num.sample = nrow(feature.in)
-    set.seed(seed)
-    
-    factor = as.numeric(factor)
-    idx.factor.0 = factor == min(factor)
-    idx.factor.1 = factor == max(factor)
-    
-    if (k > 1) {
-        cv.k = createFolds(factor, k, list = F)
-        print("feature.cv.test: number of samples in each CV, for factor 0 and 1:")
-        print(table(cv.k[idx.factor.0]))
-        print(table(cv.k[idx.factor.1]))
-    } else{
-        # k is set 1 in bootstrap, in which all bootstrapped sample are selected
-        # setting cross-validation index as all 0 will enable all samples being selected
-        # in the for loop over 1 to k. feature.in[cv.k != i,]
-        cv.k = rep(0, num.sample)
-    }
-    
-    test.out = matrix(NA, k, num.feature)
-    
-    for (i in 1:k) {
-        idx = cv.k != i
-        
-        if (method == "mean.diff") {
-            test.out[i, ] = apply(feature.in[cv.k != i & idx.factor.0,], 2, mean) -
-                            apply(feature.in[cv.k != i & idx.factor.1,], 2, mean)
-        } else if (method == "glmnet.coef") {
-            # run cv.glmnet to get the coefficients and use the CV of them as feature weights.
-            set.seed(444)
-            cv.fit = cv.glmnet(
-                feature.in[cv.k != i, ],
-                factor[cv.k != i],
-                nfold = glmnet.para$nfolds.inner,
-                alpha = glmnet.para$alpha,
-                family = glmnet.para$family,
-                standardize = F
-            )
-            
-            #test.out[i,] = abs(coef(cv.fit, s="lambda.min"))[-1]
-            test.out[i, ] = coef(cv.fit, s = "lambda.min")[-1]
-        } else{
-            for (i.feature in 1:num.feature) {
-                if (method == "kendall") {
-                    test.result = cor.test(feature.in[idx, i.feature], factor[idx], method = "kendall")
-                    value = abs(test.result$estimate)
-                } else if (method == "wilcox") {
-                    test.result = wilcox.test(feature.in[idx, i.feature], factor[idx])
-                    value = abs(test.result$estimate)
-                } else if (method == "spearman") {
-                    test.result = cor.test(feature.in[idx, i.feature], factor[idx], method = "spearman")
-                    value = abs(test.result$estimate)
-                } else if (method == "pearson") {
-                    test.result = cor.test(feature.in[idx, i.feature], factor[idx])
-                    value = abs(test.result$estimate)
-                } else if (method == "biserial") {
-                    value = abs(biserial.cor(feature.in[idx, i.feature], factor[idx]))
-                }
-                test.out[i, i.feature] = value
-            }
-        }
-    }
-    return(test.out)
-}
-
-feature.cv.boot = function(feature.in,
-                           factor,
-                           n = 100,
-                           method,
-                           glmnet.para,
-                           pca = F) {
-    
-    f.cv.boot = matrix(NA, n, ncol(feature.in))
-    factor = remap.factor(factor)
-    
-    for (i in 1:n) {
-        set.seed(i)
-        boot.idx = sample(1:nrow(feature.in), nrow(feature.in), replace = T)
-        feature.boot = feature.in[boot.idx,]
-        factor.boot = factor[boot.idx]
-        if (pca) {
-            f.cv.boot[i, ] = feature.cv.test.pca(feature.boot, factor.boot, k = 1, method)
-        } else{
-            f.cv.boot[i, ] = feature.cv.test(feature.boot, factor.boot, k = 1, method, glmnet.para)
-        }
-    }
-    return(f.cv.boot)
-}
-
-compute.feature.weight = function(x.train, y.train, method = "mean.diff.boot", glmnet.para) {
-    penalty.weight = method
-    cut.off = c(0,1)
-    
-    if (penalty.weight == "none") {
-        f.weight.cv = rep(1, dim(x.train)[2])
-    } else {
-        if (penalty.weight == "mean.diff") {
-            f.weight = feature.cv.test(x.train, y.train, 10, "mean.diff", glmnet.para)
-        } else if (penalty.weight == "wilcox") {
-            f.weight = feature.cv.test(x.train, y.train, 10, "wilcox", glmnet.para)
-        } else if (penalty.weight == "kendall") {
-            f.weight = feature.cv.test(x.train, y.train, 10, "kendall", glmnet.para)
-        } else if (penalty.weight == "pearson") {
-            f.weight = feature.cv.test(x.train, y.train, 10, "pearson", glmnet.para)
-        } else if (penalty.weight == "mean.diff.boot") {
-            f.weight = feature.weight.mean.diff.boot(x.train,
-                                       y.train,
-                                       nboots = 500)
-        } else if (penalty.weight == "pearson.boot") {
-            f.weight = feature.cv.boot(x.train,
-                                       y.train,
-                                       n = 500,
-                                       method = "pearson",
-                                       glmnet.para)
-        } else if (penalty.weight == "biserial.boot") {
-            f.weight = feature.cv.boot(x.train,
-                                       y.train,
-                                       n = 500,
-                                       method = "biserial",
-                                       glmnet.para)
-        } else if (penalty.weight == "glmnet.coef.boot") {
-            f.weight = feature.cv.boot(x.train,
-                                       y.train,
-                                       n = 500,
-                                       method = "glmnet.coef",
-                                       glmnet.para)
-        } else if (penalty.weight == "mean.diff.boot.pca") {
-            f.weight = feature.cv.boot(
-                x.train,
-                y.train,
-                n = 500,
-                method = "mean.diff",
-                glmnet.para,
-                pca = T
-            )
-        }
-        
-        # compute coefficient of variation and map it to range 1:100.
-        if (dim(f.weight)[1]>1){
-            f.weight.cv = scale.0.1(abs(apply(f.weight, 2, sd) / apply(f.weight, 2, mean)))*99 + 1
-        } else{
-            f.weight.cv = scale.0.1(1/f.weight)*99 +1
-        }
-        
-        if (glmnet.para$cutoff[1]>0){
-            cutoff.value = quantile(f.weight.cv, cutoff[1])
-            #feature.weight[feature.weight<cutoff.value] = min(feature.weight) 
-            f.weight.cv[f.weight.cv<cutoff.value] = 0
-        }
-        
-        if (glmnet.para$cutoff[2]<1){
-            cutoff.value = quantile(f.weight.cv, cutoff[2])
-            f.weight.cv[f.weight.cv>cutoff.value] = 1
-        }
-        # log transform the weights:
-        
-        if (glmnet.para$log.penalty.weight) {
-            print('log transform weight:')
-            f.weight.cv = log(f.weight.cv, base = 100)
-        }
-        
-    }
-    return(f.weight.cv)
-}
-
 
 library(glmnet)
 #library(SIS)
@@ -477,7 +182,12 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
             #print("computing feature weights:")
             #print(penalty.weight)
             
-            f.weight.cv = compute.feature.weight(x.train, y.train, penalty.weight, glmnet.para)
+            if (glmnet.para$penalty.weight=='mean.diff.boot'){
+                f.weight.cv = feature.weight.mean.diff.boot(x.train, y.train, nboots = 500, cutoff = c(0.1, .9), log.base = 100)
+            } else if (glmnet.para$penalty.weight=='none'){
+                f.weight.cv = rep(1, dim(x.train)[2])
+            }
+            
             #print("feature penalty weights:")
             #print(f.weight.cv)
             
@@ -636,8 +346,8 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
     reproducibility.index = rep(NA, length(coefs.ind.sum))
     none.zero.index = coefs.ind.sum > 0
     #print(result.coefs)
-    reproducibility.index[none.zero.index] = (abs(coefs.ind.sum[none.zero.index] - k /
-                                                      2) - (k / 2) %% 1) / floor(k / 2)
+    
+    reproducibility.index[none.zero.index] = (abs(coefs.ind.sum[none.zero.index] - k / 2) - (k / 2) %% 1) / floor(k / 2)
     # it is so weird that when reproducibility.index is cbind to other matrix and vector and changed to data frame, it become a factor!!!
     # and it won't happen if we use data.frame(...) directly rather than as.data.frame(cbind(...))
     result.coefs.ind = data.frame(
