@@ -1,12 +1,7 @@
 #!/usr/bin/env Rscript
 
-# this is old version. see scriptd_stats02_cv_functions2.R (with functions for reproducibility index in a seperated file.)
-# xin niu 03-05-2020.
-
 library(caret)
 # createFolds()
-
-
 
 scale.0.1 = function(dat) {
     # the output will be coerced to matrix.
@@ -20,66 +15,32 @@ scale.0.1 = function(dat) {
     return(scaled.dat)
 }
 
-
 compute.acc = function(y, yhat) {
     y = as.numeric(y)
     yhat = as.numeric(yhat)
     
-    acc <- sum(y == yhat, na.rm = TRUE) / length(y)
+    acc <- sum(y == yhat) / length(y)
     
-    ylevel = sort(unique(yhat), decreasing = F)
+    ylevel = sort(unique(y), decreasing = F)
     
     if (length(ylevel) == 2) {
         # asuming ylevel = c(0, 1)
-        sensi <- sum(y == yhat & y == ylevel[2], na.rm = TRUE) / sum(y == ylevel[2], na.rm = TRUE)
-        speci <- sum(y == yhat & y == ylevel[1], na.rm = TRUE) / sum(y == ylevel[1], na.rm = TRUE)
+        sensi <-
+            sum(y == yhat & y == ylevel[2]) / sum(y == ylevel[2])
+        speci <-
+            sum(y == yhat & y == ylevel[1]) / sum(y == ylevel[1])
     }
-    else if (length(ylevel==1)&max(y)==ylevel){
-        print('compute.acc: 1 level of yhat')
-        sensi <- 1
+    else if (max(yhat) == max(y)) {
+        sensi <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
         speci <- NaN
-    }
-    else if (length(ylevel==1)&min(y)==ylevel){
-        print('compute.acc: 1 level of yhat')
+    } else{
+        speci <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
         sensi <- NaN
-        speci <- 1
-    }
-    else {
-        print('compute.acc: more than 2 levels of yhat')
-        sensi <- NaN
-        speci <- NaN
     }
     
     temp <- c(acc, sensi, speci)
     return(temp)
 }
-
-#compute.acc = function(y, yhat) {
-#    y = as.numeric(y)
-#    yhat = as.numeric(yhat)
-#    
-#    acc <- sum(y == yhat) / length(y)
-#    
-#    ylevel = sort(unique(y), decreasing = F)
-#    
-#    if (length(ylevel) == 2) {
-#        # asuming ylevel = c(0, 1)
-#        sensi <-
-#            sum(y == yhat & y == ylevel[2]) / sum(y == ylevel[2])
-#        speci <-
-#            sum(y == yhat & y == ylevel[1]) / sum(y == ylevel[1])
-#    }
-#    else if (max(yhat) == max(y)) {
-#        sensi <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
-#        speci <- NaN
-#    } else{
-#        speci <- sum(y == yhat & y == ylevel) / sum(y == ylevel)
-#        sensi <- NaN
-#    }
-#    
-#    temp <- c(acc, sensi, speci)
-#    return(temp)
-#}
 
 remap.factor = function(f, min = 0, max = 1) {
     f = as.numeric(f)

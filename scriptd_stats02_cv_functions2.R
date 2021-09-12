@@ -1,11 +1,5 @@
 #!/usr/bin/env Rscript
 
-# this is newer version of scriptd_stats02_cv_functions.R, with functions for reproducibility index
-# in a seperated file: functions_reproducibility_index.R, as we don't need functions in this file 
-# for the simulation analysis.
-
-# xin niu 03-05-2020.
-
 # run cross validation on brain imaging data.
 # calls functions_reproducibility_index.R to compute feature weights.
 # called by scriptd_stats03_**_cv.R
@@ -183,7 +177,7 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
             #print(penalty.weight)
             
             if (glmnet.para$penalty.weight=='mean.diff.boot'){
-                f.weight.cv = feature.weight.mean.diff.boot(x.train, y.train, nboots = 500, cutoff = c(0.1, .9), log.base = 100)
+                f.weight.cv = feature.weight.mean.diff.boot(x.train, y.train, nboots = 500, cutoff = glmnet.para$cutoff, log.base = 100)
             } else if (glmnet.para$penalty.weight=='none'){
                 f.weight.cv = rep(1, dim(x.train)[2])
             }
@@ -344,10 +338,16 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
     coefs.ind.sum = apply(result.coefs.ind, 1, sum)
     #reproducibility.index = (abs(coefs.ind.sum - k/2)-(k/2)%%1)/floor(k/2)
     reproducibility.index = rep(NA, length(coefs.ind.sum))
-    none.zero.index = coefs.ind.sum > 0
+    reproducibility.index.nonzero = rep(NA, length(coefs.ind.sum))
     #print(result.coefs)
     
-    reproducibility.index[none.zero.index] = (abs(coefs.ind.sum[none.zero.index] - k / 2) - (k / 2) %% 1) / floor(k / 2)
+    # compute reproducibility without considering features that are not selected in any folds of cross-validation:
+    none.zero.index = coefs.ind.sum > 0
+    reproducibility.index.nonzero[none.zero.index] = (abs(coefs.ind.sum[none.zero.index] - k / 2) - (k / 2) %% 1) / floor(k / 2)
+    
+    # compute reproducibility considering all features:
+    reproducibility.index = (abs(coefs.ind.sum - k / 2) - (k / 2) %% 1) / floor(k / 2)
+    
     # it is so weird that when reproducibility.index is cbind to other matrix and vector and changed to data frame, it become a factor!!!
     # and it won't happen if we use data.frame(...) directly rather than as.data.frame(cbind(...))
     result.coefs.ind = data.frame(
@@ -355,6 +355,7 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
         result.coefs.ind,
         coefs.ind.sum,
         reproducibility.index,
+        reproducibility.index.nonzero,
         stringsAsFactors = F
     )
     
@@ -367,6 +368,7 @@ glmnet.nested.cv = function(x, y, glmnet.para) {
     glmnet.out$coefs = result.coefs.df
     glmnet.out$coefs.robustness = mean(coefs.robustness, na.rm = T)
     glmnet.out$reproducibility = mean(reproducibility.index, na.rm = T)
+    glmnet.out$reproducibility.nonzero = mean(reproducibility.index.nonzero, na.rm = T)
     glmnet.out$penalty.weights = result.feature.weights
     
     if (glmnet.para$return.mod) {
@@ -479,6 +481,9 @@ select.feature = function(feature.in,
     #print(feature.idx)
     return(feature.idx)
 }
+
+
+
 
 svm.cv.fun = function(brain.feature,
                       subject.info,

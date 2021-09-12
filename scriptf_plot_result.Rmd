@@ -1,0 +1,794 @@
+---
+title: "plot_result"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+## prediction accuracy for each cv:
+```{r}
+#library(plyr)
+library("RColorBrewer")
+
+slash = .Platform$file.sep
+file_date = '2021-02-26' # add age of trauma events to features, save accuracy for each cv.
+
+nfolds = "10"
+
+dir.name.head = 'result_d03_trauma_age_cv_glmnet_folds_'
+
+# elasticnet:
+file_dir1 = paste0(dir.name.head, nfolds, "_5_alpha_0.5_none_logtransform_1_", file_date)
+file_name1 = paste0("glmnetfolds_", nfolds, "_5_alpha_0.5_none_logtransform_1acc.csv")
+
+# alpha: 1 lasso, type.measure: class
+file_dir2 = paste0(dir.name.head, nfolds, "_5_alpha_1_none_logtransform_1_", file_date)
+file_name2 = paste0("glmnetfolds_", nfolds, "_5_alpha_1_none_logtransform_1acc.csv") 
+
+# weightd, alpha: 0 ridge regression, type.measure: class
+#file_dir3 = "result_d03_trauma_age_glmnet_folds_5_5_alpha_0_mean.diff.boot_logtransform_1_2018-10-03"
+#file_name3 = "glmnetfolds_5_5_alpha_0_mean.diff.boot_logtransform_12018_Oct_03_11_30_09.csv" 
+
+# weighted elasticnet:
+file_dir3 = paste0(dir.name.head, nfolds, "_5_alpha_0.5_mean.diff.boot_logtransform_1_", file_date)
+file_name3 = paste0("glmnetfolds_", nfolds, "_5_alpha_0.5_mean.diff.boot_logtransform_1acc.csv")
+
+# weighted alpha: 1 lasso, type.measure: class
+file_dir4 = paste0(dir.name.head, nfolds, "_5_alpha_1_mean.diff.boot_logtransform_1_", file_date)
+file_name4 = paste0("glmnetfolds_", nfolds, "_5_alpha_1_mean.diff.boot_logtransform_1acc.csv")
+
+# elastic net:
+file1 = read.table(paste(file_dir1, slash, file_name1, sep = ""), sep = ",", header = T)
+# lasso:
+file2 = read.table(paste(file_dir2, slash, file_name2, sep = ""), sep = ",", header = T)
+
+# weighted elastic net:
+file3 = read.table(paste(file_dir3, slash, file_name3, sep = ""), sep = ",", header = T)
+# weighted lasso:
+file4 = read.table(paste(file_dir4, slash, file_name4, sep = ""), sep = ",", header = T)
+
+
+print(file1)
+print(file2)
+
+feature.name = c("spm.vbm.aal", "label.fa", "tract.fa",
+                 "dti.fa",  "mf.dti", "multimodal.feature.aal")
+
+xlabel.name = c('gmv(aal)', 'FA(label)', 'FA(tract)',
+                'FA(all)', 'FA&MD', 'multimodal features')
+
+
+#feature.name = c("cat.vbm.hammers", "cat.vbm.neuromorph", "spm.vbm.aal", 
+#                 "alff.aal", "falff.aal", "reho.aal", "label.fa", "tract.fa",
+#                 "dti.fa", "multimodal.feature.aal",
+#                 "mf.dti", "mf.vbm.dti", "mf.vbm.aal.dti", "mf.resting.aal", 
+#                 "mf.vbm.fa", "mf.vbm.aal.fa", "mf.vbm.resting.aal")
+#
+#xlabel.name = c('gmv(hammers)', 'gmv(neuromorph)', 'gmv(aal)', 
+#                'alff(aal)', 'falff(aal)', 'reho(aal)', 'FA(label)', 'FA(tract)',
+#                'FA(all)', 'multimodal features', 
+#                'FA&MD', 'gmv(HarvardOxford)&FA&MD', 'gmv(aal)&FA&MD', 'alff&reho',
+#                'gmv(aal)&FA', 'gmv(aal)&FA', 'gmv(aal)&alff&reho')
+
+
+palette.blue = brewer.pal(n = 8, name = "Blues")
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+#method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", palette.blue[5], palette.blue[7])
+
+```
+
+
+```{r, fig.height = 6, fig.width = 9}
+library(ggplot2)
+library(ggpubr)
+
+
+row.index = which(file1[,1] %in% feature.name)
+
+file1 = file1[row.index, ]
+file2 = file2[row.index, ]
+file3 = file3[row.index, ]
+file4 = file4[row.index, ]
+
+file1$method = 'Elasticnet'
+file2$method = 'LASSO'
+file3$method = 'R-index elasticnet'
+file4$method = 'R-index LASSO'
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+
+
+barplot.acc = function(file1, file2, palette.barplot){
+
+  #file.summary1 = summarySE(file1, 'acc', 'group')
+  #file.summary2 = summarySE(file2, 'acc', 'group')
+  #plot.data = rbind(file.summary1, file.summary2)
+  
+  #p <- ggplot(plot.data, aes(x=group, y=acc, fill=method)) + 
+  #   geom_bar(stat="identity", 
+  #            #color="black", 
+  #            position=position_dodge()) +
+  #   geom_errorbar(aes(ymin=acc-se, ymax=acc+se), width=.2,
+  #                 position=position_dodge(.9)) +
+  #   scale_fill_manual(values=palette.barplot) +
+  #   coord_cartesian(ylim=c(.5,.8))+
+  #   xlab("") + ylab("Accuracy")+
+  #   scale_x_discrete(labels=xlabel.name)+
+  #   theme(legend.position="top", axis.text.x = element_text(angle = 40))
+  
+  plot.data = rbind(file1, file2)
+  p <- ggbarplot(plot.data, x="group", y="acc", fill = "method", color = 'method', 
+                 size = 1.05,
+                 add = "mean_se", palette = palette.barplot, 
+                 add.params = list(color = 'black'),
+       position = position_dodge(.9))+
+    coord_cartesian(ylim=c(.55,.8))+
+    xlab("") + ylab("Accuracy")+
+    scale_x_discrete(labels=xlabel.name)+
+    #theme(axis.text.x = element_text(angle = 70))
+    theme(axis.text.x = element_text(vjust=.9, hjust = .9, angle = 40, size = 20),
+          axis.text.y = element_text(size = 20),
+          axis.title=element_text(size=20),
+          legend.text=element_text(size=20),
+          legend.title=element_text(size=20), 
+        #axis.text.x=element_blank(),
+        #axis.ticks.x=element_blank(),
+        plot.margin = margin(0.5,0.5,.5,.5, "cm"))
+
+  return(p)
+  
+}
+
+
+p1 = barplot.acc(file1, file3, method.palette[5:6])
+p1
+
+
+p2 = barplot.acc(file2, file4, method.palette[3:4])
+p2
+```
+
+
+## load data file:
+#
+```{r}
+#library(plyr)
+
+slash = .Platform$file.sep
+
+# alpha: 0 ridge regression, type.measure: class
+#file_dir1 = "result_d03_glmnet_folds_5_5_alpha_0_none_logtransform_1_2018-10-02"
+#file_name1 = "glmnetfolds_5_5_alpha_0_none_logtransform_12018_Oct_02_19_37_20.csv" 
+
+#file_date = '2019-06-10'
+#file_date = '2019-07-11'# reproducibility does not contain zero nfold outer 10
+#file_date = '2019-07-17'# reproducibility contains zero nfold outer 10
+#file_date = '2020-03-03' # udpated penalty calculation
+file_date = '2021-02-01' # add age of trauma events to features.
+
+nfolds = "10"
+
+dir.name.head = 'result_d03_trauma_age_glmnet_folds_'
+
+# elasticnet:
+file_dir1 = paste0(dir.name.head, nfolds, "_5_alpha_0.5_none_logtransform_1_", file_date)
+file_name1 = paste0("glmnetfolds_", nfolds, "_5_alpha_0.5_none_logtransform_1.csv")
+
+# alpha: 1 lasso, type.measure: class
+file_dir2 = paste0(dir.name.head, nfolds, "_5_alpha_1_none_logtransform_1_", file_date)
+file_name2 = paste0("glmnetfolds_", nfolds, "_5_alpha_1_none_logtransform_1.csv") 
+
+# weightd, alpha: 0 ridge regression, type.measure: class
+#file_dir3 = "result_d03_trauma_age_glmnet_folds_5_5_alpha_0_mean.diff.boot_logtransform_1_2018-10-03"
+#file_name3 = "glmnetfolds_5_5_alpha_0_mean.diff.boot_logtransform_12018_Oct_03_11_30_09.csv" 
+
+# weighted elasticnet:
+file_dir3 = paste0(dir.name.head, nfolds, "_5_alpha_0.5_mean.diff.boot_logtransform_1_", file_date)
+file_name3 = paste0("glmnetfolds_", nfolds, "_5_alpha_0.5_mean.diff.boot_logtransform_1.csv")
+
+# weighted alpha: 1 lasso, type.measure: class
+file_dir4 = paste0(dir.name.head, nfolds, "_5_alpha_1_mean.diff.boot_logtransform_1_", file_date)
+file_name4 = paste0("glmnetfolds_", nfolds, "_5_alpha_1_mean.diff.boot_logtransform_1.csv")
+
+
+
+# elastic net:
+file1 = read.table(paste(file_dir1, slash, file_name1, sep = ""), sep = ",", header = T)
+# lasso:
+file2 = read.table(paste(file_dir2, slash, file_name2, sep = ""), sep = ",", header = T)
+
+# weighted elastic net:
+file3 = read.table(paste(file_dir3, slash, file_name3, sep = ""), sep = ",", header = T)
+# weighted lasso:
+file4 = read.table(paste(file_dir4, slash, file_name4, sep = ""), sep = ",", header = T)
+
+
+print(file1)
+print(file2)
+```
+
+# barplot of consistency index:
+```{r, fig.height = 6, fig.width = 9}
+library(ggpubr)
+
+row.index = which(file1[,1] %in% feature.name)
+
+file1 = file1[row.index, ]
+file2 = file2[row.index, ]
+file3 = file3[row.index, ]
+file4 = file4[row.index, ]
+
+file1$method = 'Elasticnet'
+file2$method = 'LASSO'
+file3$method = 'R-index elasticnet'
+file4$method = 'R-index LASSO'
+
+barplot.cindex = function(file1, file2, palette.barplot, ylim = c(0,1)){
+  
+  plot.data = rbind(file1, file2)
+  colnames(plot.data)[1]='group'
+  p <- ggbarplot(plot.data, x="group", y="Reproducibility", fill = "method", color = 'method', size = 1.05,
+       palette = palette.barplot, 
+       position = position_dodge(.9))+
+    coord_cartesian(ylim=ylim)+
+    xlab("") + ylab("Consitency Index")+
+    scale_x_discrete(labels=xlabel.name)+
+    theme(axis.text.x = element_text(vjust=.9, hjust = .9, angle = 40, size = 20),
+          axis.text.y = element_text(size = 20),
+          axis.title=element_text(size=20),
+          legend.position = "none",
+          plot.margin = margin(1,0.5,.5,.5, "cm"))
+
+  return(p)
+  
+}
+
+p3 = barplot.cindex(file1, file3, method.palette[5:6], c(.4, 1))
+p3
+
+
+p4 = barplot.cindex(file2, file4, method.palette[3:4], c(.6, 1))
+p4
+```
+```{r, fig.height = 12, fig.width = 18}
+
+result_dir = "result_f01_trauma_age_plots_all_features"
+dir.create(result_dir, showWarnings = FALSE)
+
+figure = ggarrange(p1, p2, p3, p4,
+                   labels = c("A", "B", "C", "D"), 
+                   vjust = c(1,1,.1,.1),
+                   font.label = list(size = 20, color = "black"),
+                   ncol = 2, nrow = 2, widths = c(1, 1)
+                   )+
+          theme(plot.margin = margin(0.2,0.2,.2,.2, "cm")) 
+
+ggsave(paste0(result_dir, "/ptsd_lasso_elasticnet_acc_cindex_barplot.png"), width = 18, height = 12)
+print(figure)
+
+```
+
+
+## plot ptsd prediction accuracy:
+
+
+```{r}
+
+library(ggpubr)
+require(plyr)
+
+# select column of two files:
+column.idx = c(2,6,7,8)
+
+result_dir = "result_f01_trauma_age_plots_all_features"
+dir.create(result_dir, showWarnings = FALSE)
+
+figure_name = "class"
+y.label = c("ptsd_trauma_acc", "ptsd_trauma_reproducibility", "ptsd_trauma_robustness", "ptsd_trauma_reproducibility.nonzero")
+#y.label.rename = c("prediction accuracy", "reproducibility", "robustness", "reproducibility.nonzero")
+y.label.rename = c("prediction accuracy", "consistency index", "robustness", "consistency index")
+
+# orignal features:
+#feature.name = c("cat.vbm.hammers", "cat.vbm.neuromorph", "spm.vbm", "spm.vbm.aal", 
+#                 "spm.vbm.bn246", "alff", "alff.aal", "alff.bn246", "falff", "falff.aal", 
+#                 "falff.bn246", "reho", "reho.aal", "reho.bn246", "label.fa", "tract.fa",
+#                 "dti.fa", "multimodal.feature", "multimodal.feature.aal", "multimodal.feature.bn246", 
+#                 "mf.dti", "mf.vbm.dti", "mf.vbm.aal.dti", "fm.vbm.bn246.dti", "mf.resting", "mf.resting.aal", 
+#                 "mf.resting.bn246", "mf.vbm.fa", "mf.vbm.aal.fa", "mf.vbm.bn246.fa", "mf.vbm.resting", 
+#                 "mf.vbm.resting.aal", "mf.vbm.resting.bn246")
+#
+#xlabel.name = feature.name
+
+feature.name = c("cat.vbm.hammers", "cat.vbm.neuromorph", "spm.vbm.aal", 
+                 "alff.aal", "falff.aal", "reho.aal", "label.fa", "tract.fa",
+                 "dti.fa", "multimodal.feature.aal",
+                 "mf.dti", "mf.vbm.dti", "mf.vbm.aal.dti", "mf.resting.aal", 
+                 "mf.vbm.fa", "mf.vbm.aal.fa", "mf.vbm.resting.aal")
+
+xlabel.name = c('gmv(hammers)', 'gmv(neuromorph)', 'gmv(aal)', 
+                'alff(aal)', 'falff(aal)', 'reho(aal)', 'FA(label)', 'FA(tract)',
+                'FA(all)', 'multimodal features', 
+                'FA&MD', 'gmv(aal)&FA&MD', 'gmv(aal)&FA&MD', 'alff&reho',
+                'gmv(aal)&FA', 'gmv(aal)&FA', 'gmv(aal)&alff&reho')
+
+#feature.name = c( "spm.vbm.aal", 
+#                 "alff.aal", "reho.aal", "label.fa",
+#                 "multimodal.feature.aal")
+#
+#xlabel.name = c('gmv(aal)', 
+#                'alff(aal)', 'reho(aal)', 'FA(label)', 
+#                'multimodal features')
+
+row.index = which(file1[,1] %in% feature.name)
+
+# select features that have prediction accuracy higher than .65 with both of the standard method:
+#row.index = file1$accuracy>.65 & file3$accuracy>.65
+#
+
+file1 = file1[row.index, ]
+file2 = file2[row.index, ]
+file3 = file3[row.index, ]
+file4 = file4[row.index, ]
+
+#label_name = c("elasticnet", "lasso")
+#
+#for (i.plot in 1:length(column.idx)){
+#
+#    data.plot = rbind(file1[,c(1, column.idx[i.plot])], file2[,c(1, column.idx[i.plot])]) 
+#    names(data.plot)[1:2] = c("feature", y.label[i.plot])
+#    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+#    data.plot$method = label
+#    
+#    #print(data.plot)
+#    #print(dim(data.plot))
+#    
+#    plot.name = paste(figure_name, y.label[i.plot], label_name[1], "vs", label_name[2],".png", sep = "_")
+#    print(plot.name)
+#    png(plot.name, width = 600, height = 400)
+#    p = ggline(data.plot, x = "feature", y = y.label[i.plot],
+#       linetype = "method", shape = "method",
+#       color = "method", palette = c("#00AFBB", "#E7B800")) + rotate_x_text(45)
+#    print(p)
+#    dev.off()
+#}
+
+figure_name = "class"
+#label_name = c("elasticnet", "weighted_elasticnet")
+label_name = c("ElasticNet", "R-index ElasticNet")
+
+ylim.list = list(c(.55, .8), c(.4, .99), NULL, NULL, c(.6, .8), c(.65, .99), NULL, NULL)
+plot.idx = 1
+
+
+p_list = list()
+
+for (i.plot in 1:length(column.idx)){
+  
+
+    data.plot = rbind(file1[,c(1, column.idx[i.plot])], file3[,c(1, column.idx[i.plot])]) 
+    names(data.plot)[1:2] = c("feature", y.label[i.plot])
+    data.plot$feature = factor(data.plot$feature, levels = unique(data.plot$feature))
+    
+    data.plot$feature2 <- mapvalues(data.plot$feature, 
+          from=feature.name, 
+          to=xlabel.name)
+    
+    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+    data.plot$method = label
+    
+    #print(data.plot)
+    #print(dim(data.plot))
+    
+    plot.name = paste(figure_name, y.label[i.plot], label_name[1], "vs", label_name[2],".png", sep = "_")
+    print(plot.name)
+    png(paste0(result_dir, plot.name), width = 600, height = 400)
+    p = ggline(data.plot, x = "feature2", y = y.label[i.plot],
+               linetype = "method", shape = "method", ylab = y.label.rename[i.plot], xlab = NULL,
+               color = "method", palette = c("#00AFBB", "#E7B800"), ylim = ylim.list[[plot.idx]]) + 
+      
+        xlab('')+
+        #font("xlab", size = 20, color = "black")+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")+
+        theme(plot.margin = unit(c(1,1,1,1), "cm"))+
+        rotate_x_text(45)
+    print(p)
+    dev.off()
+    
+    p_list = c(p_list, list(p))
+    plot.idx = plot.idx+1
+}
+
+figure_name = "class"
+#label_name = c("lasso", "weighted_lasso")
+label_name = c("LASSO", "R-index LASSO")
+for (i.plot in 1:length(column.idx)){
+
+    data.plot = rbind(file2[,c(1, column.idx[i.plot])], file4[,c(1, column.idx[i.plot])]) 
+    names(data.plot)[1:2] = c("feature", y.label[i.plot])
+    data.plot$feature = factor(data.plot$feature, levels = unique(data.plot$feature))
+    data.plot$feature2 <- mapvalues(data.plot$feature, 
+          from=feature.name, 
+          to=xlabel.name)
+    
+    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+    data.plot$method = label
+    
+    #print(data.plot)
+    #print(dim(data.plot))
+    
+    plot.name = paste(figure_name, y.label[i.plot], label_name[1], "vs", label_name[2],".png", sep = "_")
+    print(plot.name)
+    png(paste0(result_dir, plot.name), width = 600, height = 400)
+    p = ggline(data.plot, x = "feature2", y = y.label[i.plot],
+       linetype = "method", shape = "method", ylab = y.label.rename[i.plot],
+       color = "method", palette = c("#00AFBB", "#E7B800"), ylim = ylim.list[[plot.idx]]) + 
+        #font("xlab", size = 20, color = "black")+
+        xlab('')+
+        font("ylab", size = 20, color = "black")+
+        font("xy.text", size = 15, color = "black")+
+        font("legend.title", size = 18, color = "black", face = "bold")+
+        font("legend.text", size = 18, color = "black")+
+        theme(plot.margin = unit(c(1,1,1,1), "cm"))+
+        rotate_x_text(45)
+    print(p)
+    dev.off()
+    p_list = c(p_list, list(p))
+    plot.idx = plot.idx+1
+}
+
+```
+
+
+```{r, fig.height = 12, fig.width = 20}
+figure = ggarrange(p_list[[1]], p_list[[5]], p_list[[2]], p_list[[6]],
+                   labels = c("A", "B", "C", "D", "E", "F"), font.label = list(size = 24, color = "black"),
+                   ncol = 2, nrow = 2, widths = c(1, 1))
+
+ggsave(paste0(result_dir, "/ptsd_lasso_elasticnet_merge_reprodubibility.png"), width = 20, height = 12)
+print(figure)
+
+```
+
+
+
+```{r, fig.height = 12, fig.width = 20}
+figure = ggarrange(p_list[[1]], p_list[[5]], p_list[[4]], p_list[[8]],
+                   labels = c("A", "B", "C", "D", "E", "F"), font.label = list(size = 24, color = "black"),
+                   ncol = 2, nrow = 2, widths = c(1, 1))
+
+ggsave(paste0(result_dir, "/ptsd_lasso_elasticnet_merge_reprodubibility_nozeros.png"), width = 20, height = 12)
+print(figure)
+
+```
+
+
+
+
+
+```{r}
+
+library(ggpubr)
+library(broman) #paired.perm.test
+# select column of two files:
+column.idx = c(2,6,7,8)
+
+figure_name = "class_boxplot_paried"
+y.label = c("ptsd_trauma_acc", "ptsd_trauma_reproducibility", "ptsd_trauma_robustness", "ptsd_trauma_reproducibility.nonzero")
+#y.label.rename = c("prediction accuracy", "reproducibility", "robustness", "reproducibility.nonzero")
+y.label.rename = c("prediction accuracy", "consistency index", "robustness", "consistency index")
+
+
+row.index = which(file1[,1] %in% feature.name)
+
+# select features that have prediction accuracy higher than .65 with both of the standard method:
+#row.index = file1$accuracy>.65 & file3$accuracy>.65
+
+
+ylab_plot = c('prediction accuracy', 'consistency index', 'prediction accuracy', 'consistency index')
+
+#label_name = c("elasticnet", "weighted_elasticnet")
+label_name = c("ElasticNet", "R-index ElasticNet")
+
+ylim.list = list(c(.55, .8), c(.4, 1),c(.55, .8), c(.4, 1))
+p_list = list()
+
+for (i.plot in 1:length(column.idx)){
+  
+    data.plot = rbind(file1[,c(1, column.idx[i.plot])], file3[,c(1, column.idx[i.plot])]) 
+    names(data.plot)[1:2] = c("feature", y.label[i.plot])
+    data.plot$feature = factor(data.plot$feature, levels = unique(data.plot$feature))
+    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+    data.plot$method = label
+    
+    #print(data.plot)
+    #print(dim(data.plot))
+    
+    # paired permutation t test:
+    set.seed(111)
+    p.value = paired.perm.test(file1[,column.idx[i.plot]] - file3[,column.idx[i.plot]], n.perm = 10000)
+    
+    plot.name = paste(figure_name, y.label[i.plot], label_name[1], "vs", label_name[2],".png", sep = "_")
+    print(plot.name)
+    png(plot.name, width = 400, height = 300)
+    
+    #p = ggpaired(data.plot, x = "method", y = y.label[i.plot], ylim = ylim.list[[i.plot]],
+    #             color = "method", line.color = "gray", line.size = .5, point.size = 1.2,
+    #             palette = c("#00AFBB", "#E7B800"))+
+    p = ggboxplot(data.plot, x = "method", y = y.label[i.plot], ylim = ylim.list[[i.plot]], size = 1.1, width = .5,
+                 color = "method", line.color = "gray", point.size = 1.2, add = "jitter", nortch = T,
+                 palette = c("#00AFBB", "#E7B800"))+
+      xlab('')+
+      ylab(ylab_plot[i.plot])+
+      font("xlab", size = 20, color = "black")+
+      font("ylab", size = 20, color = "black")+
+      font("xy.text", size = 15, color = "black")+
+      font("legend.title", size = 18, color = "black", face = "bold")+
+      font("legend.text", size = 18, color = "black")+
+      theme(plot.margin = unit(c(1,1,1,1), "cm"))+
+      #stat_compare_means(method = "wilcox.test",paired = TRUE,label.x = 1.3, size = 5.5)
+      annotate(geom="text", x=1.5, y=ylim.list[[i.plot]][2], 
+               label=paste0("permutation t-test: p = ", toString(p.value)),
+               color="black",
+               size = 5.5)
+    
+    print(p)
+    dev.off()
+    
+    p_list = c(p_list, list(p))
+}
+
+ylim.list = list(c(.6, .8), c(.7, 1),c(.6, .8), c(.7, 1))
+#label_name = c("lasso", "weighted_lasso")
+label_name = c("LASSO", "R-index LASSO")
+for (i.plot in 1:length(column.idx)){
+
+    data.plot = rbind(file2[,c(1, column.idx[i.plot])], file4[,c(1, column.idx[i.plot])]) 
+    names(data.plot)[1:2] = c("feature", y.label[i.plot])
+    data.plot$feature = factor(data.plot$feature, levels = unique(data.plot$feature))
+    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+    data.plot$method = label
+    
+    #print(data.plot)
+    #print(dim(data.plot))
+    
+    set.seed(111)
+    p.value = paired.perm.test(file2[,column.idx[i.plot]] - file4[,column.idx[i.plot]], n.perm = 10000)
+    
+    plot.name = paste(figure_name, y.label[i.plot], label_name[1], "vs", label_name[2],".png", sep = "_")
+    print(plot.name)
+    png(plot.name, width = 400, height = 300)
+    
+    #p = ggpaired(data.plot, x = "method", y = y.label[i.plot], ylim = ylim.list[[i.plot]],
+    #             color = "method", line.color = "gray", line.size = .5, point.size = 1.2, 
+    #             palette = c("#00AFBB", "#E7B800"))+
+    p = ggboxplot(data.plot, x = "method", y = y.label[i.plot], ylim = ylim.list[[i.plot]], size = 1.1,
+                 color = "method", line.color = "gray", point.size = 1.5, width = .5,
+                 add = "jitter", nortch = T,
+                 palette = c("#00AFBB", "#E7B800"))+
+      xlab('')+
+      ylab(ylab(ylab_plot[i.plot]))+
+      font("xlab", size = 20, color = "black")+
+      font("ylab", size = 20, color = "black")+
+      font("xy.text", size = 15, color = "black")+
+      font("legend.title", size = 18, color = "black", face = "bold")+
+      font("legend.text", size = 18, color = "black")+
+      theme(plot.margin = unit(c(1,1,1,1), "cm"))+
+      #stat_compare_means(method = "wilcox.test",paired = TRUE,label.x = 1.3, size = 5.5)
+      annotate(geom="text", x=1.5, y=ylim.list[[i.plot]][2], 
+               label=paste0("permutation t-test: p = ", toString(p.value)),
+               color="black",
+               size = 5.5)
+    
+          
+    print(p)
+    dev.off()
+    p_list = c(p_list, list(p))
+}
+
+
+
+```
+
+
+```{r, fig.height = 10, fig.width = 12}
+figure = ggarrange(p_list[[1]], p_list[[5]], p_list[[2]], p_list[[6]],
+                   labels = c("A", "B", "C", "D", "E", "F"), font.label = list(size = 24, color = "black"),
+                   ncol = 2, nrow = 2, widths = c(1, 1))
+
+ggsave(paste0(result_dir, "/ptsd_lasso_elasticnet_merge_reprodubibility_boxplot.png"), width = 12, height = 10)
+print(figure)
+
+```
+
+
+
+```{r, fig.width=10, fig.height=7}
+#figure.dir = "plot_Oct_02"
+#dir.create(figure.dir)
+#
+#column.idx = c(2,7,6)
+#column.name = c("accuracy", "robustness", "reproducibility")
+#
+#figure_name = "class_"
+##label_name = c("elasticnet", "lasso", "weighted_elasticnet", "weighted_lasso")
+#label_name = c("ElasticNet", "LASSO", "R-index ElasticNet", "R-index LASSO")
+#y.label = c("Ptsd_Acc", "Ptsd_reproducibility", "Ptsd_robustness")
+#for (i.plot in 1:length(column.idx)){
+#
+#    data.plot = rbind(file1[,c(1, column.idx[i.plot])], file2[,c(1, column.idx[i.plot])], 
+#                      file3[,c(1, column.idx[i.plot])], file4[,c(1, column.idx[i.plot])]) 
+#    names(data.plot)[1:2] = c("feature", column.name[i.plot])
+#    
+#    label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]), 
+#              rep(label_name[3], dim(file3)[1]), rep(label_name[4], dim(file4)[1]))
+#    data.plot$method = label
+#    
+#    print(data.plot)
+#    # reorder the factor levels of feature to make the order of xtick label same as in the csv file:
+#    feature = data.plot$feature
+#    data.plot$feature = factor(feature, unique(feature))
+#    #print(dim(data.plot))
+#    
+#    plot.name = paste(figure.dir, slash, figure_name, y.label[i.plot],".pdf", sep = "")
+#    print(plot.name)
+#    #pdf(plot.name, width = 300, height = 200)
+#    p = ggline(data.plot, "feature", column.name[i.plot],
+#       linetype = "method", shape = "method",
+#       color = "method", palette = 'joc') + rotate_x_text(45)
+#    print(p)
+#    #dev.off()
+#}
+```
+## scatter plot of robustness and prediction accuracy.
+```{r}
+#column.idx = c(2,6)
+#figure_name = "scatter"
+##label_name = c("ridge", "lasso", "weighted_ridge", "weighted_lasso")
+#label_name = c("ridge", "lasso", "weighted_ridge", "weighted_lasso")
+#
+#data.plot = rbind(file1[,column.idx], file2[,column.idx], 
+#                  file3[, column.idx], file4[,column.idx]) 
+#
+#names(data.plot)[1:2] = c("acc", "robustness")
+#
+#label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]), 
+#          rep(label_name[3], dim(file3)[1]), rep(label_name[4], dim(file4)[1]))
+#data.plot$method = label
+#
+#print(data.plot)
+##print(dim(data.plot))
+#
+#plot.name = paste(figure_name,".png", sep = "_")
+#print(plot.name)
+#p = ggscatter(data.plot, x = "acc", y = "robustness",
+#   color = "method", palette = 'joc',
+#   add = "reg.line")
+#
+#png(plot.name, width = 600, height = 400)
+#print(p)
+#dev.off()
+#print(p)
+```
+
+
+
+```{r, fig.height = 7, fig.width = 12}
+
+column.idx = c(2,6)
+plot.name = paste0(result_dir, "/scatter_reproducibility.jpg")
+
+#label_name = c( "lasso", "weighted_lasso", "elasticnet", "weighted_elasticnet")
+label_name  = c('LASSO', 'R-index LASSO', 'ElasticNet', 'R-index ElasticNet')
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+data.plot = rbind(file2[,column.idx], file4[,column.idx], 
+                  file1[, column.idx], file3[,column.idx]) 
+
+names(data.plot)[1:2] = c("acc", "reproducibility")
+
+label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]), 
+          rep(label_name[3], dim(file3)[1]), rep(label_name[4], dim(file4)[1]))
+
+data.plot$method = factor(label, levels = label_name)
+
+p = ggscatter(data.plot, x = "acc", y = "reproducibility",
+   color = "method", palette = method.palette[3:6],
+   xlab = 'prediction accuracy', ylab = "consistency index",
+   add = "reg.line") + 
+  font("xlab", size = 20, color = "black")+
+  font("ylab", size = 20, color = "black")+
+  font("xy.text", size = 15, color = "black")+
+  font("legend.title", size = 18, color = "black", face = "bold")+
+  font("legend.text", size = 18, color = "black") +
+  stat_cor(aes(color = method), label.x = .6)
+
+print(p)
+ggsave(plot.name, plot = p, width = 12, height = 7)
+```
+```{r, fig.height = 7, fig.width = 12}
+
+column.idx = c(2,6)
+plot.name = paste0(result_dir, "/scatter_diff_reproducibility_acc.jpg")
+
+label_name  = c('R-index LASSO - LASSO', 'R-index ElasticNet - ElasticNet')
+
+method.list = c("ridge", "wridge", "lasso", "wlasso", "elasticnet", "welasticnet")
+method.palette = c("#FFDB6D", "#C4961A", "#C3D7A4", "#52854C", "#4E84C4", "#293352")
+
+data.plot = rbind(file4[,column.idx] - file2[,column.idx], 
+                  file3[, column.idx] - file1[,column.idx]) 
+
+names(data.plot)[1:2] = c("acc", "reproducibility")
+
+label = c(rep(label_name[1], dim(file1)[1]), rep(label_name[2], dim(file2)[1]))
+
+data.plot$method = factor(label, levels = label_name)
+
+p = ggscatter(data.plot, x = "acc", y = "reproducibility",
+   color = "method", palette = method.palette[c(4,6)],
+   xlab = 'prediction accuracy', ylab = "consistency index",
+   add = "reg.line") + 
+  font("xlab", size = 20, color = "black")+
+  font("ylab", size = 20, color = "black")+
+  font("xy.text", size = 15, color = "black")+
+  font("legend.title", size = 18, color = "black", face = "bold")+
+  font("legend.text", size = 18, color = "black") +
+  stat_cor(aes(color = method), method = 'kendall', label.x = -.05, label.y = c(.3, .315))
+
+print(p)
+ggsave(plot.name, plot = p, width = 12, height = 7)
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
